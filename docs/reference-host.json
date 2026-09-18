@@ -1,0 +1,11 @@
+{
+  "observed_on": "2026-09-18",
+  "system": "Linux",
+  "kernel": "6.8.0-139-generic",
+  "architecture": "x86_64",
+  "service_python": "3.12.13",
+  "uv": "0.12.13",
+  "docker_server": "29.1.3",
+  "performance_claim": null,
+  "deployment_claim": null
+}

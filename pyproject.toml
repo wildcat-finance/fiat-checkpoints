@@ -1,0 +1,23 @@
+[project]
+name = "fiat-checkpoints"
+version = "0.1.0"
+description = "Closed checkpoint intake scaffold"
+requires-python = "==3.12.13"
+license = "Apache-2.0"
+dependencies = [
+    "fastapi==0.141.1",
+    "psycopg[binary]==3.3.6",
+    "uvicorn==0.53.0",
+]
+
+[dependency-groups]
+dev = ["httpx==0.28.1"]
+
+[tool.uv]
+required-version = "==0.12.13"
+package = false
+
+[[tool.uv.index]]
+name = "pypi"
+url = "https://pypi.org/simple"
+default = true
