@@ -76,3 +76,25 @@ a stated reason, and a durable after-action record.
 
 `wildcat-finance/fiat-checkpoints` is public. No archive, observation,
 credential, environment value or deployment secret enters this tree.
+
+## Adopted specification amendment -- 2026-09-18
+
+The adopted service specification and intake issue #1 supersede the earlier
+transfer, jurisdiction and signer assumptions above. Their exact source
+bindings are in `docs/sources.json`; the original record remains unchanged.
+
+Transfers go through the authenticated service gateway. Contributors receive
+neither R2 credentials nor provider upload/download URLs. Both primary and
+recovery buckets use EU jurisdiction in separate Cloudflare accounts, with
+account mapping kept outside this public repository.
+
+R2 object-write credentials are not assumed to exclude delete. Effective
+indefinite locks must refuse overwrite and deletion of authority/recovery
+objects. Runtime roles cannot alter those rules. Actual token and lock behavior
+still needs the live proof owned by Skills #863; neither this record nor local
+health establishes provider enforcement.
+
+The external CP-5 policy signer uses AWS KMS `SIGN_VERIFY`, `ECC_NIST_P256`,
+`ECDSA_SHA_256` in `eu-west-2`. It checks evidence and policy before signing.
+The service's signer client belongs to the publication packet. No signer,
+account, bucket, cloud resource or deployment is created by this scaffold.

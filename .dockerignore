@@ -1,0 +1,10 @@
+**
+!src/
+!src/**
+!scripts/
+!scripts/serve.py
+!config/
+!config/container.json
+!requirements.lock
+!containers/
+!containers/api.Dockerfile

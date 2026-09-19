@@ -1,0 +1,95 @@
+{
+  "schema": "fiat-checkpoints-source-manifest/v1",
+  "baseline_commit": "61b8dc4be1587d1c6ef46f2f228833214965e7f1",
+  "sources": [
+    {
+      "id": "adopted-specification",
+      "url": "https://github.com/user-attachments/files/32263127/862-r2-service-specification.md",
+      "sha256": "8ee755c1f9e5c29703af30bd08caffb6fad80c8a0990ee0acecebef09b02f541",
+      "bytes": 103107,
+      "digest_subject": "preserved source record",
+      "reading_limit": "Exact adopted bytes; preserved publicly.",
+      "observed_on": "2026-09-18"
+    },
+    {
+      "id": "service-issue-1",
+      "url": "https://github.com/wildcat-finance/fiat-checkpoints/issues/1",
+      "sha256": "47e32eb8425a631d9c085f95663766ce454bf92df54b87813538fe43a3dfe35c",
+      "bytes": 9611,
+      "digest_subject": "preserved source record",
+      "reading_limit": "Scope record observed on 2026-09-18; preserved JSON source digest.",
+      "observed_on": "2026-09-18"
+    },
+    {
+      "id": "skills-1676",
+      "url": "https://github.com/wildcat-finance/skills/issues/1676",
+      "sha256": "80e14bc78308813216ec0b1690b3cccc9cb7060627ad6d2bc63d31c9b6438833",
+      "bytes": 13706,
+      "digest_subject": "preserved source record",
+      "reading_limit": "Release prerequisite observed open; no protocol release inferred.",
+      "observed_on": "2026-09-18"
+    },
+    {
+      "id": "cp2-pr",
+      "url": "https://github.com/wildcat-finance/skills/pull/1413",
+      "sha256": "e71e5f3594c618ebd1b7c25bfb3ab7d5ec3999271e37846f611faceda6b5eb96",
+      "bytes": 20240,
+      "digest_subject": "preserved source record",
+      "reading_limit": "Complete current PR body read; historical baseline.",
+      "observed_on": "2026-09-18"
+    },
+    {
+      "id": "cp3-pr",
+      "url": "https://github.com/wildcat-finance/skills/pull/1652",
+      "sha256": "87e364a5e7ab658ba38ceeb444cd7cfe2f90fa20e6f38f5e258340c3af8c87dd",
+      "bytes": 34691,
+      "digest_subject": "preserved source record",
+      "reading_limit": "Complete current PR body read; carryovers retained in study.",
+      "observed_on": "2026-09-18"
+    },
+    {
+      "id": "cp2-audit",
+      "url": "https://github.com/wildcat-finance/skills/blob/0bc39f278e24d8cdd79abed5da16bd5ce81e4c5a/audit/rounds/fiat-860-restore-identity-continuation-r2.md",
+      "sha256": "f39c7c0534d563d5ea03acf8fec32f2439f6296ef0000c1655557fbafc3714d8",
+      "bytes": 5809,
+      "digest_subject": "preserved source record",
+      "reading_limit": "Directly read; source exclusions and findings retained.",
+      "observed_on": "2026-09-18"
+    },
+    {
+      "id": "cp3-audit",
+      "url": "https://github.com/wildcat-finance/skills/blob/41116f4f9901b7b70a22db9f42235af65951957e/audit/rounds/fiat-861-outer-checkpoint-archive-export-and-restore.md",
+      "sha256": "bce008b201071b1ded3e656e24c0bfabb67923932a2cb3a994cb260172d6709c",
+      "bytes": 376713,
+      "digest_subject": "preserved source record",
+      "reading_limit": "Preserved; complete audit reading remains a Step 2 entry condition.",
+      "observed_on": "2026-09-18"
+    }
+  ],
+  "shipped": [
+    {
+      "path": "docs/specification.md",
+      "sha256": "8ee755c1f9e5c29703af30bd08caffb6fad80c8a0990ee0acecebef09b02f541",
+      "bytes": 103107
+    },
+    {
+      "path": "docs/study.md",
+      "sha256": "07cc6f1bea496c4982dcce234475a901ef2b6400174877fa2e0b6b8794ffe317",
+      "bytes": 33657
+    },
+    {
+      "path": "docs/runbook.md",
+      "sha256": "595c88af7ed9f510b8cea0677babd0ea32a3948ed9b4867282a41a1de7482349",
+      "bytes": 23896
+    }
+  ],
+  "substrate_prefix": {
+    "bytes": 3515,
+    "sha256": "99a4ee46e3c58a4528ad6ef4433a39f55f8d3c8ccaefe8e5d86371ae95ee8bc0"
+  },
+  "design_selection": {
+    "candidate": "mediated-isolated",
+    "record_sha256": "fed947c292ba99a7f049a336a568d873608bfbb1a68098f65707ad2c94095054",
+    "conformance": "pending"
+  }
+}
