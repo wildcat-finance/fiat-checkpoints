@@ -60,3 +60,7 @@ Primary metadata is available from [PyPI FastAPI](https://pypi.org/project/fasta
 [PyPI Psycopg](https://pypi.org/project/psycopg/3.3.6/) and
 [PyPI HTTPX](https://pypi.org/project/httpx/0.28.1/). Review the graph and release
 changes again before any deployment, which this scaffold does not authorize.
+
+## CI parser addition, 2026-09-19
+
+[PyYAML 6.0.3](https://pypi.org/project/PyYAML/6.0.3/) parses the workflow in development tests. All 11 locked artifact hashes match its PyPI release metadata; none were yanked, and that metadata listed no vulnerabilities on 2026-09-19. This check did not review upstream source or an advisory database. The runtime lock and all prior package records are unchanged.

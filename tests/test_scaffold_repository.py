@@ -12,6 +12,8 @@ import tempfile
 import tomllib
 import unittest
 
+import yaml
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SPECIFICATION_SHA256 = "8ee755c1f9e5c29703af30bd08caffb6fad80c8a0990ee0acecebef09b02f541"
@@ -98,6 +100,17 @@ class PinsTests(unittest.TestCase):
         for action in re.findall(r"uses: (\S+)", workflow):
             self.assertRegex(action, r"^[a-z0-9/-]+@[0-9a-f]{40}$")
         self.assertIn("./scripts/check.sh --group scaffold", workflow)
+
+    def test_ci_workflow_is_parseable_yaml(self):
+        try:
+            workflow = yaml.safe_load((ROOT / ".github/workflows/check.yml").read_text())
+        except yaml.YAMLError:
+            self.fail("workflow YAML does not parse")
+        steps = workflow["jobs"]["scaffold"]["steps"]
+        self.assertTrue(steps)
+        for step in steps:
+            if "run" in step:
+                self.assertIsInstance(step["run"], str)
 
 
 class ProvenanceTests(unittest.TestCase):
