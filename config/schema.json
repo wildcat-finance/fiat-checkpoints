@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Closed scaffold configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "profile", "service_id", "environment_id", "host", "port", "trust_profile", "protocol_lock", "sandbox_profile", "request_max_bytes", "carrier_max_bytes", "validation_concurrency"],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "profile": {"enum": ["local", "production"]},
+    "service_id": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$"},
+    "environment_id": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$"},
+    "host": {"enum": ["127.0.0.1", "::1", "0.0.0.0"]},
+    "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+    "trust_profile": {"enum": ["local-test", "production"]},
+    "protocol_lock": {"enum": [null, "protocol.lock.json"]},
+    "sandbox_profile": {"enum": ["unavailable", "gvisor"]},
+    "request_max_bytes": {"type": "integer", "minimum": 1, "maximum": 65536},
+    "carrier_max_bytes": {"type": "integer", "minimum": 1, "maximum": 1073741824},
+    "validation_concurrency": {"type": "integer", "minimum": 1, "maximum": 4}
+  },
+  "allOf": [{
+    "if": {"properties": {"profile": {"const": "local"}}},
+    "then": {"properties": {
+      "environment_id": {"pattern": "-local$"},
+      "trust_profile": {"const": "local-test"}
+    }}
+  }]
+}

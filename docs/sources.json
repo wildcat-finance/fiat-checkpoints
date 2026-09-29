@@ -1,0 +1,59 @@
+{
+  "schema": "fiat-checkpoints-source-manifest/v1",
+  "baseline_commit": "61b8dc4be1587d1c6ef46f2f228833214965e7f1",
+  "sources": [
+    {
+      "id": "adopted-specification",
+      "url": "https://github.com/user-attachments/files/32263127/862-r2-service-specification.md",
+      "sha256": "8ee755c1f9e5c29703af30bd08caffb6fad80c8a0990ee0acecebef09b02f541",
+      "bytes": 103107,
+      "observed_on": "2026-09-29",
+      "binding": "Exact bytes, kept at docs/specification.md."
+    },
+    {
+      "id": "authority-protocol",
+      "url": "https://github.com/wildcat-finance/skills/tree/685158cdc5407ca5559bf9ef4a021d664e764ece",
+      "git_commit": "685158cdc5407ca5559bf9ef4a021d664e764ece",
+      "observed_on": "2026-09-29",
+      "binding": "Released checkpoint-authority/v1 protocol; Step 2 pins its lock."
+    },
+    {
+      "id": "native-source",
+      "url": "https://github.com/wildcat-finance/skills/tree/1d4e4eebcba1825d0eb3192bf08a6c509bdc0d74",
+      "git_commit": "1d4e4eebcba1825d0eb3192bf08a6c509bdc0d74",
+      "observed_on": "2026-09-29",
+      "binding": "Native command tree, profile native-1d4e4eeb-openpgp-v1."
+    },
+    {
+      "id": "inherited-scaffold",
+      "url": "https://github.com/wildcat-finance/fiat-checkpoints/tree/f81f119b1984c9379b6a4405b1492ab4a5e007fa",
+      "git_commit": "f81f119b1984c9379b6a4405b1492ab4a5e007fa",
+      "observed_on": "2026-09-29",
+      "binding": "Earlier Step 1 scaffold; reviewed code reused and re-pinned for 3.14.6."
+    },
+    {
+      "id": "service-issue-1",
+      "url": "https://github.com/wildcat-finance/fiat-checkpoints/issues/1",
+      "git_commit": "61b8dc4be1587d1c6ef46f2f228833214965e7f1",
+      "observed_on": "2026-09-29",
+      "binding": "Scope record; the commit is the target base the delivery starts from."
+    }
+  ],
+  "shipped": [
+    {
+      "path": "docs/specification.md",
+      "sha256": "8ee755c1f9e5c29703af30bd08caffb6fad80c8a0990ee0acecebef09b02f541",
+      "source": "adopted-specification"
+    },
+    {
+      "path": "docs/study.md",
+      "sha256": "7409bbf7d39b650009b691a10b414f99326005c2cacbe2cb58a0c5309dabb874",
+      "source": "service-issue-1"
+    },
+    {
+      "path": "docs/runbook.md",
+      "sha256": "d2889a23e4a7f083b8b4f0f4f64e8c982062d60be57ac26f3c8514d571c6bac7",
+      "source": "service-issue-1"
+    }
+  ]
+}

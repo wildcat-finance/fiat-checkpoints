@@ -76,3 +76,29 @@ a stated reason, and a durable after-action record.
 
 `wildcat-finance/fiat-checkpoints` is public. No archive, observation,
 credential, environment value or deployment secret enters this tree.
+
+## Correction -- 2026-09-30
+
+The adopted service specification (`docs/specification.md`, SHA-256
+`8ee755c1f9e5c29703af30bd08caffb6fad80c8a0990ee0acecebef09b02f541`) replaces
+four statements above. The text above is kept as filed. Where they disagree,
+specification sections 4.2, 6 and 9 govern.
+
+- **Grants.** Contributors get no presigned URL and no temporary R2
+  credential. They send bytes to a service upload gateway under an
+  actor-bound capability, and downloads go through a service download gateway
+  that checks current denial state (sections 4.2 and 9).
+- **Runtime deletion.** R2 object-write tokens are not assumed to exclude
+  delete. Indefinite bucket locks must refuse deletion and overwrite of
+  authority and recovery objects, and no runtime credential can change those
+  rules (sections 4.2 and 6).
+- **Signer.** The external CP-5 policy signer is AWS KMS `SIGN_VERIFY`,
+  `ECC_NIST_P256`, `ECDSA_SHA_256` in `eu-west-2`. This service owns the
+  signer client; Skills #863 provisions the signer (section 5, reference
+  deployment profile).
+- **Jurisdiction.** Both buckets use EU jurisdiction in separate Cloudflare
+  accounts. Physical region separation is unproven, and a provider-wide
+  failure reaches both copies (section 4.2).
+
+This correction creates no account, bucket, signer or deployment. Live token
+and lock behaviour still needs the proof Skills #863 owns.

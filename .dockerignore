@@ -1,0 +1,15 @@
+**
+!src/
+!src/**
+!scripts/
+!scripts/serve.py
+!config/
+!config/container.json
+!requirements.lock
+!requirements-tools.lock
+!pyproject.toml
+!uv.lock
+!.python-version
+!containers/
+!containers/api.Dockerfile
+!containers/test.Dockerfile
