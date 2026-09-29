@@ -32,9 +32,10 @@ GROUP_PATTERN = re.compile(r"[a-z][a-z0-9]{0,31}")
 MAX_GROUPS = 32
 OPTIONS = frozenset({"--group", "--report", "--candidate", "--criterion", "--out", "--show-failures"})
 COUNTER_NAMES = ("failures", "errors", "skipped", "expectedFailures", "unexpectedSuccesses")
+# multiprocessing's spawn and forkserver starts reach _posixsubprocess directly.
 CHILD_PROCESS_EVENTS = frozenset({
-    "subprocess.Popen", "os.posix_spawn", "os.fork", "os.forkpty", "os.spawn",
-    "os.system", "os.exec", "os.startfile",
+    "subprocess.Popen", "_posixsubprocess.fork_exec", "os.posix_spawn", "os.fork",
+    "os.forkpty", "os.spawn", "os.system", "os.exec", "os.startfile",
 })
 SELECTED_CANDIDATE = "isolated-pinned-runtime"
 CANDIDATES = frozenset({
@@ -86,10 +87,16 @@ def root_path(name, code):
     path = Path(name)
     if not path.is_absolute():
         path = ROOT / path
-    try:
-        relative = path.relative_to(ROOT)
-    except ValueError as exc:
-        raise Refusal(code + "-outside-root") from exc
+    # An absolute path may name ROOT through a symlinked ancestor, as macOS
+    # /var names /private/var. The shallowest ancestor that is ROOT anchors it;
+    # every component below that ancestor still gets the symlink check.
+    for ancestor in reversed(path.parents):
+        if ancestor == ROOT or ancestor.resolve() == ROOT:
+            relative = path.relative_to(ancestor)
+            path = ROOT / relative
+            break
+    else:
+        raise Refusal(code + "-outside-root")
     if not relative.parts or any(part in (".", "..", ".git") for part in relative.parts):
         raise Refusal(code + "-invalid")
     current = ROOT

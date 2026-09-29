@@ -1,6 +1,7 @@
 """Run the public check runner and its wrapper against synthetic suites."""
 
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -38,6 +39,47 @@ RESOLVERS = {
     "validation-wall-time": lambda context: 1234,
 }
 '''
+
+
+def load_runner():
+    """Import scripts/check.py as a module without running its entry point."""
+    spec = importlib.util.spec_from_file_location("fiat_checkpoints_check_runner", ROOT / "scripts/check.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class InProcessRunnerTests(unittest.TestCase):
+    """Runner guarantees checked without a child process, so report mode keeps them."""
+
+    def setUp(self):
+        self.runner = load_runner()
+
+    def test_hook_refuses_the_multiprocessing_spawn_primitive(self):
+        # multiprocessing's spawn and forkserver starts call _posixsubprocess.fork_exec
+        # without passing through subprocess.Popen.
+        for event in ("_posixsubprocess.fork_exec", "subprocess.Popen", "os.fork", "os.posix_spawn"):
+            with self.subTest(event=event), self.assertRaises(RuntimeError):
+                self.runner.forbid_child_processes(event, ())
+
+    def test_report_path_through_a_symlinked_ancestor_of_the_root_is_accepted(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            real = Path(temporary).resolve() / "real"
+            (real / "tests").mkdir(parents=True)
+            alias = Path(temporary).resolve() / "alias"
+            alias.symlink_to(real, target_is_directory=True)
+            (real / "linked").symlink_to(real, target_is_directory=True)
+            self.runner.ROOT = real
+            try:
+                path, relative = self.runner.root_path(str(alias / ".reports/result.json"), "report-path")
+            except self.runner.Refusal as refusal:
+                self.fail("aliased root refused: " + str(refusal))
+            self.assertEqual((path, relative), (real / ".reports/result.json", Path(".reports/result.json")))
+            for target, code in ((alias / "linked/result.json", "report-path-symlink"),
+                                 (alias / "tests/../../escaped.json", "report-path-invalid"),
+                                 (Path(temporary).resolve() / "escaped.json", "report-path-outside-root")):
+                with self.subTest(target=str(target)), self.assertRaisesRegex(self.runner.Refusal, "^" + code + "$"):
+                    self.runner.root_path(str(target), "report-path")
 
 
 class SyntheticRoot(unittest.TestCase):
@@ -180,6 +222,15 @@ class RunnerTests(SyntheticRoot):
         self.assertEqual(run.returncode, 1)
         self.assertEqual(json.loads((self.root / ".reports/result.json").read_bytes())["errors"], 1)
         self.assertEqual(self.run_runner("--group", "example").returncode, 0)
+
+    def test_report_mode_refuses_a_multiprocessing_spawn_child(self):
+        self.fixture("import multiprocessing, os, unittest\nclass Example(unittest.TestCase):\n"
+                     "    def test_case(self):\n"
+                     "        process = multiprocessing.get_context('spawn').Process(target=os.getpid)\n"
+                     "        process.start()\n        process.join()\n")
+        run = self.run_runner("--group", "example", "--report", ".reports/result.json")
+        self.assertEqual(run.returncode, 1, run.stderr)
+        self.assertEqual(json.loads((self.root / ".reports/result.json").read_bytes())["errors"], 1)
 
     def test_report_mode_with_only_child_process_tests_is_empty(self):
         self.fixture("import unittest\nclass Spawning(unittest.TestCase):\n    spawns_child_process = True\n"
