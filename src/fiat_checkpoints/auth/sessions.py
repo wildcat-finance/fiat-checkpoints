@@ -12,7 +12,7 @@ in a cycle. Expired or revoked sessions and tokens never count against a
 ceiling. See adr/bind-uploads-to-enrolled-keys.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 import hmac
 import logging
@@ -45,10 +45,12 @@ def _event(name, **fields):
     LOGGER.info(name, extra={"event": name, **fields})
 
 
+# A value that carries a secret keeps it out of its representation, so a log
+# line, an assertion message or a traceback that prints it shows no secret.
 @dataclass(frozen=True)
 class LoginStart:
-    state: str
-    binding: str
+    state: str = field(repr=False)
+    binding: str = field(repr=False)
     expires_at: datetime
 
 
@@ -64,14 +66,14 @@ class Actor:
 
 @dataclass(frozen=True)
 class NewSession:
-    secret: str
-    csrf_token: str
+    secret: str = field(repr=False)
+    csrf_token: str = field(repr=False)
     actor: Actor
 
 
 @dataclass(frozen=True)
 class AccessToken:
-    token: str
+    token: str = field(repr=False)
     expires_at: datetime
 
 

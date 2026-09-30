@@ -224,6 +224,18 @@ class SessionLifetimeTests(SessionCase):
         for secret in (opened.secret, token.token, begun.state):
             self.assertIn(secret_sha256(secret), stored)
 
+    def test_values_that_carry_a_secret_never_show_it_in_their_representation(self):
+        begun, code = self.start(user_document(41, "a"))
+        opened = self.sessions.complete_login(begun.state, begun.binding, code, self.provider, T0)
+        token = self.sessions.issue_token(opened.actor, T0)
+        shown = "\n".join(text(value) for value in (begun, opened, token) for text in (repr, str))
+        # A failing check must not print the secret it found, so the message is fixed.
+        for label, secret in (("state", begun.state), ("binding", begun.binding), ("session", opened.secret),
+                              ("csrf", opened.csrf_token), ("token", token.token)):
+            with self.subTest(value=label):
+                self.assertTrue(secret not in shown, "secret-in-representation")
+        self.assertIn("expires_at", shown)
+
     def test_values_that_are_not_service_secrets_refuse_before_any_lookup(self):
         opened = self.sessions.open_session(41, T0)
         for value in ("ghp_" + "a" * 36, "gho_" + "b" * 36, "github_pat_" + "c" * 30, "Bearer x", "",
