@@ -11,9 +11,9 @@ and validation to Step 6.
 
 Specification section 8 fixes the identity rules: a dedicated GitHub App
 login, the immutable numeric user id from authenticated `GET /user`, Secure,
-HttpOnly and SameSite cookies with CSRF protection, 15-minute CLI tokens, and
-login state that lives five minutes, is used once and binds one browser.
-Logout revokes sessions. Enrollment needs an authenticated identity, a
+HttpOnly and SameSite cookies with CSRF protection, and 15-minute CLI tokens.
+Login state lasts five minutes, is used once and binds one browser. Logout
+revokes sessions. Enrollment needs an authenticated identity, a
 challenge, proof of possession and a signed operator approval. The upload
 endorsement, signed by the enrolled key, binds actor, candidate, run, the
 three checkpoint identities, carrier length, parent link, nonce and expiry.
@@ -59,7 +59,11 @@ before a lookup, so a pasted personal token never reaches a query. Renewal
 spends the presented token, and pairing or renewal needs a current grant in
 some allowlisted run. Logout revokes the session and every token paired from
 it. Ceilings: 10,000 live login states, 16 live sessions per actor (the oldest
-is revoked), 8 live tokens per session. Expired or revoked rows never count. An unauthenticated flood of about 33 login starts per second can hold the login-state ceiling, refusing every login for up to 300 seconds while issued sessions keep working; the ceiling protects the database, and per-client limits belong to the deployment edge (accepted 2026-09-30).
+is revoked), 8 live tokens per session. Expired or revoked rows never count.
+An unauthenticated flood of about 33 login starts per second can hold the
+login-state ceiling and refuse every login for up to 300 seconds, while issued
+sessions keep working. The ceiling protects the database; per-client limits
+belong to the deployment edge (accepted 2026-09-30).
 The specification sets no browser session lifetime; eight hours covers a
 working day, and a table check pins it.
 
@@ -105,15 +109,15 @@ per challenge, only while the trust head is unchanged.
 
 A candidate can be endorsed again before signer authorization. Once an
 endorsement has spent the candidate's challenge, a replayed announce issues
-the next challenge with a fresh nonce, while the candidate is unexpired and
-before signer authorization, up to 288 challenges: one 300-second
-endorsement after another across the 24-hour candidate lifetime. The latest
-recorded endorsement is the bound one while it is unexpired;
+the next challenge with a fresh nonce. That holds while the candidate is
+unexpired and before signer authorization, up to 288 challenges: one
+300-second endorsement after another across the 24-hour candidate lifetime.
+The latest recorded endorsement is the bound one while it is unexpired;
 `EndorsementStore.bound` refuses it once expired, or once it would expire
-before the instant its caller needs, and an earlier endorsement is never
-bound again. An exact replay of the bound envelope returns the
-recorded result. Another envelope for a spent challenge, an endorsement over
-an earlier challenge and a replay of an earlier endorsement refuse.
+before the instant its caller needs, and an earlier endorsement is never bound
+again. An exact replay of the bound envelope returns the recorded result.
+Another envelope for a spent challenge, an endorsement over an earlier
+challenge and a replay of an earlier endorsement refuse.
 
 | Refusal | Code |
 | --- | --- |
@@ -203,5 +207,5 @@ The released replay requires an acceptance to be issued inside its
 endorsement's validity, at most five minutes. Issue #2 therefore signs only
 against `EndorsementStore.bound` with the acceptance time as its `until`,
 checked again under the candidate lock, and asks the contributor to endorse
-again when that endorsement has expired or would expire first. No decision intent in this packet carries an endorsement
-digest.
+again when that endorsement has expired or would expire first. No decision
+intent in this packet carries an endorsement digest.
