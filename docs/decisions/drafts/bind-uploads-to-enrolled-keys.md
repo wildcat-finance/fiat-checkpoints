@@ -127,6 +127,13 @@ an earlier challenge and a replay of an earlier endorsement refuse.
 A 422 carries the library's own `protocol_code` when the library produced it.
 Any unexpected failure is 503 `authority_unavailable` with no text.
 
+Sections 13 and 16 ask a client to wait a bounded time before retrying and
+give no value. This service chooses `Retry-After: 60` for 429 `quota_exceeded`
+and `Retry-After: 30` for every 503, each with the same `retry_after_seconds`
+in the body, and `retry_after_seconds: 30` in the status of a candidate it is
+retrying after a dependency failure. Both stay under Step 3's 300-second
+retry cap.
+
 ### Historical signers
 
 `Projection.historical_signers` resolves each enrollment reference and signing

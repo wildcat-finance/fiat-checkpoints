@@ -5,16 +5,22 @@ from dataclasses import replace
 import json
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
 
 from fiat_checkpoints.api.app import StartupRefusal, production_refusals
 from fiat_checkpoints.api.intake import LOGIN_COOKIE, SESSION_COOKIE, IntakeServices, create_intake_app
+from fiat_checkpoints.auth import sessions as sessions_module
 from fiat_checkpoints.auth.refusals import PUBLIC_STATUS
 from fiat_checkpoints.auth.sessions import SessionStore
 from fiat_checkpoints.auth.tokens import csrf_token, new_secret
+from fiat_checkpoints.domain.transitions import Evidence
+from fiat_checkpoints.grants.endorsement import EndorsementStore
 from fiat_checkpoints.grants.intake import Intake
+from fiat_checkpoints.persistence.coordinator import Unavailable
 from tests.auth_support import (SETTINGS, Clock, FakeProvider, StubProjections, T0, build, request, session_headers,
                                 set_cookies, user_document)
-from tests.persistence_support import DatabaseCase, recorded_events
+from tests.persistence_support import ACTOR, IDENTITIES, DatabaseCase, at, recorded_events
 
 
 class ApiCase(DatabaseCase):
@@ -31,7 +37,11 @@ class ApiCase(DatabaseCase):
 
     def assert_refused(self, response, code):
         self.assertEqual((response.status_code, response.json()["code"]), (PUBLIC_STATUS[code], code))
-        self.assertEqual(set(response.json()), {"request_id", "code"})
+        # Only a quota or dependency refusal names a wait, in the header and the body alike.
+        retry = {429: 60, 503: 30}.get(response.status_code)
+        self.assertEqual(set(response.json()), {"request_id", "code"} | ({"retry_after_seconds"} if retry else set()))
+        self.assertEqual((response.headers.get("retry-after"), response.json().get("retry_after_seconds")),
+                         (None if retry is None else str(retry), retry))
         self.assertEqual(response.headers["cache-control"], "no-store")
 
     def browser_login(self, user_id=41, login="contributor"):
@@ -220,6 +230,25 @@ class BoundaryTests(ApiCase):
         self.assert_refused(response, "authority_unavailable")
         self.assertNotIn("private-failure-marker", response.text + json.dumps(events))
 
+    def test_quota_and_dependency_refusals_carry_a_bounded_retry_after(self):
+        with mock.patch.object(sessions_module, "MAX_LIVE_LOGIN_STATES", 1):
+            self.assertEqual(self.call("POST", "/v1/login").status_code, 200)
+            limited = self.call("POST", "/v1/login")
+        self.assertEqual((limited.status_code, limited.headers.get("retry-after"),
+                          limited.json().get("retry_after_seconds")), (429, "60", 60))
+
+        class Failing(SessionStore):
+            def begin_login(self, now):
+                raise RuntimeError("private-failure-marker")
+
+        failing = Failing(self.database, audience=SETTINGS.service_id, environment=SETTINGS.environment_id)
+        failed = request(create_intake_app(SETTINGS, replace(self.services, sessions=failing)), "POST", "/v1/login")
+        self.assertEqual((failed.status_code, failed.headers.get("retry-after"),
+                          failed.json().get("retry_after_seconds")), (503, "30", 30))
+        for response in (self.call("GET", "/v1/session"), self.call("GET", "/v1/unknown")):
+            self.assertEqual((response.headers.get("retry-after"), response.json().get("retry_after_seconds")),
+                             (None, None))
+
     def test_events_are_fixed_fields_without_credentials(self):
         with recorded_events() as events:
             started, finished = self.browser_login()
@@ -300,3 +329,36 @@ class MalformedEntryPointTests(ApiCase):
                 response = self.call(method, path, headers=extra, content=content)
                 self.assertEqual((response.status_code, response.json()["code"]), (PUBLIC_STATUS[code], code))
         self.assertEqual(self.services.sessions.session(opened.secret, T0).actor_id, 41)
+
+
+class GrantingProjections:
+    """Every read is granted; the status checks start no verifier process."""
+
+    environment = "test"
+
+    def run_for(self, scope):
+        return SimpleNamespace(scope=scope)
+
+    def current(self, _run):
+        return SimpleNamespace(grant=lambda *_arguments: None)
+
+    def any_grant(self, _actor_id, _now):
+        return True
+
+
+class StatusRetryTests(DatabaseCase):
+    def test_a_candidate_retrying_a_dependency_reports_a_bounded_wait(self):
+        clock = Clock(at(1))
+        app, services = build(self.database, clock, projections=GrantingProjections())
+        candidate = self.quarantined()
+        EndorsementStore(self.database).bind(candidate, IDENTITIES, "5" * 64, T0)
+        path = f"/v1/candidates/{candidate}"
+        headers = session_headers(services.sessions.open_session(ACTOR, T0))
+        quiet = request(app, "GET", path, headers=headers)
+        self.assertEqual((quiet.status_code, quiet.json().get("retry_after_seconds")), (200, None))
+        claim = self.coordinator.claim_validation({Evidence.ISOLATED_WORKER}, at(1))
+        self.coordinator.complete_validation(claim.lease, Unavailable("sandbox_unavailable"), at(1))
+        retrying = request(app, "GET", path, headers=headers)
+        self.assertEqual((retrying.status_code, retrying.json()["state"], retrying.json().get("retry_after_seconds")),
+                         (200, "validating", 30))
+        self.assertIsNone(retrying.headers.get("retry-after"))

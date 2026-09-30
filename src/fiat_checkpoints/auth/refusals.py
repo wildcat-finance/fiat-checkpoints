@@ -7,7 +7,7 @@ them ever holds a supplied value, a token, a key or a library message.
 
 import re
 
-from fiat_checkpoints.domain.coordination import CoordinationRefusal
+from fiat_checkpoints.domain.coordination import RETRY_CAP_SECONDS, CoordinationRefusal
 from fiat_checkpoints.records.refusals import PROTOCOL
 
 
@@ -30,6 +30,12 @@ PUBLIC_STATUS = {
     "authority_unavailable": 503,
     "capability_not_enabled": 501,
 }
+# Sections 13 and 16 ask a client to retry a quota or dependency refusal only
+# after a bounded wait. The values are this service's choice, never above
+# Step 3's retry cap; see adr/bind-uploads-to-enrolled-keys.
+RETRY_AFTER_SECONDS = {429: 60, 503: 30}
+if not all(0 < seconds <= RETRY_CAP_SECONDS for seconds in RETRY_AFTER_SECONDS.values()):
+    raise ValueError("retry-after-bound")
 # Only these name evidence the caller supplied and can correct, so only these
 # may carry the library's own code back to the caller.
 PROTOCOL_CODE_PUBLIC = frozenset({"identity_mismatch", "endorsement_invalid", "signer_not_enrolled",
@@ -57,6 +63,11 @@ class AuthRefusal(CoordinationRefusal):
     @property
     def status(self):
         return PUBLIC_STATUS[self.code]
+
+    @property
+    def retry_after_seconds(self):
+        """The bounded wait before a retry, for quota and dependency refusals only."""
+        return RETRY_AFTER_SECONDS.get(self.status)
 
 
 def from_record(code, error, reason):

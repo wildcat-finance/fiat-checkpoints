@@ -13,7 +13,7 @@ from datetime import datetime
 import re
 import uuid
 
-from fiat_checkpoints.auth.refusals import AuthRefusal
+from fiat_checkpoints.auth.refusals import RETRY_AFTER_SECONDS, AuthRefusal
 from fiat_checkpoints.domain.coordination import GIB, AnnounceRequest, candidate_uuid, positive_int, require_now
 from fiat_checkpoints.domain.identities import CheckpointIdentities, IdentityMismatch
 from fiat_checkpoints.grants.endorsement import EndorsementStore, check_binding
@@ -45,6 +45,7 @@ class Status:
     candidate_id: uuid.UUID
     state: str
     code: str | None
+    retry_after_seconds: int | None = None
 
 
 @dataclass(frozen=True)
@@ -141,7 +142,10 @@ class Intake:
         run = self.projections.run_for(binding.scope)
         self.projections.current(run).grant(actor_id, "read_status", now)
         view = self.coordinator.candidate(run.scope, actor_id, binding.candidate_id)
-        return Status(view.candidate_id, view.state.value, view.terminal_code)
+        # A candidate the service is retrying after a dependency failure gives
+        # the same bounded wait as a 503 refusal (sections 13 and 16).
+        retry = RETRY_AFTER_SECONDS[503] if view.retry_reason is not None and view.terminal_code is None else None
+        return Status(view.candidate_id, view.state.value, view.terminal_code, retry)
 
     def prove_enrollment(self, actor_id, repository_id, run_id, body, now):
         """Record the authenticated actor's proof of possession for its own operator challenge.

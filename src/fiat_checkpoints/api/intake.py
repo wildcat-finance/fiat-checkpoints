@@ -162,7 +162,13 @@ def create_intake_app(settings, services, root=REPOSITORY, trees=DEFAULT_TREES):
         body = {"request_id": request.state.request_id, "code": refusal.code}
         if refusal.protocol_code is not None and refusal.code in PROTOCOL_CODE_PUBLIC:
             body["protocol_code"] = refusal.protocol_code
-        return JSONResponse(status_code=refusal.status, content=body)
+        retry = refusal.retry_after_seconds
+        if retry is not None:
+            body["retry_after_seconds"] = retry
+        response = JSONResponse(status_code=refusal.status, content=body)
+        if retry is not None:
+            response.headers["Retry-After"] = str(retry)
+        return response
 
     @app.middleware("http")
     async def correlate(request: Request, call_next):
@@ -335,8 +341,10 @@ def create_intake_app(settings, services, root=REPOSITORY, trees=DEFAULT_TREES):
         actor, _secret = await authenticate(request, now, unsafe=False)
         seen = await run_in_threadpool(services.intake.status, actor.actor_id, request.path_params["candidate_id"],
                                        now)
-        return reply(request, 200, {"candidate_id": str(seen.candidate_id), "state": seen.state,
-                                    "code": seen.code})
+        body = {"candidate_id": str(seen.candidate_id), "state": seen.state, "code": seen.code}
+        if seen.retry_after_seconds is not None:
+            body["retry_after_seconds"] = seen.retry_after_seconds
+        return reply(request, 200, body)
 
     @route("POST", "/v1/runs/{repository_id}/{run_id}/enrollment-proofs")
     async def enrollment_proof(request, now):
