@@ -4,6 +4,7 @@ import asyncio
 from dataclasses import replace
 import errno
 import gc
+import os
 import resource
 import tempfile
 import tracemalloc
@@ -16,6 +17,7 @@ from fiat_checkpoints.api.gateway import EdgeProfile, GatewayLimits, create_gate
 from fiat_checkpoints.domain.coordination import CANDIDATE_LIFETIME, GIB, CoordinationRefusal
 from fiat_checkpoints.storage.quarantine import R2Quarantine
 from fiat_checkpoints.upload import staging as staging_module
+from fiat_checkpoints.upload.staging import StagingArea, StagingRefusal
 from tests.persistence_support import T0, recorded_events
 from fiat_checkpoints.persistence.transfer import object_key
 from fiat_checkpoints.upload.capability import capability_sha256
@@ -147,6 +149,66 @@ class DiskTests(UploadCase):
         gateway = self.make_gateway(staging=self.staging)
         self.assert_refused(self.upload(candidate, capability, data, app=gateway), 429, "quota_exceeded")
         self.assertEqual(self.attempts(candidate), [(1, "open")])
+
+    def test_the_free_floor_holds_once_every_admitted_stream_has_written(self):
+        directory = self.root / "floor"
+        directory.mkdir(mode=0o700)
+
+        def free():
+            # Ten chunks of filesystem whose only other content is the staged files.
+            return 10 * CHUNK - sum(entry.stat(follow_symlinks=False).st_size for entry in os.scandir(directory))
+
+        area = StagingArea(directory, capacity_bytes=64 * CHUNK, floor_bytes=6 * CHUNK, free_bytes=free)
+        self.addCleanup(area.close)
+        first, second = area.reserve(2 * CHUNK), area.reserve(2 * CHUNK)
+        # Nothing is written yet, but the two streams will write four chunks.
+        with self.assertRaises(StagingRefusal) as caught:
+            area.reserve(2 * CHUNK)
+        self.assertEqual(caught.exception.code, "staging_full")
+        for reservation in (first, second):
+            reservation.create()
+            reservation.write(payload(2 * CHUNK))
+            reservation.finish()
+        self.assertEqual(free(), area.floor_bytes)
+        # Written bytes count once: removing one file leaves room for exactly one more.
+        first.close()
+        third = area.reserve(2 * CHUNK)
+        for reservation in (second, third):
+            reservation.close()
+        self.assertEqual(area.usage()["reserved_bytes"], 0)
+
+    def test_the_free_floor_counts_bytes_a_live_stream_has_yet_to_write(self):
+        directory = self.root / "staging"
+
+        def free():
+            # Seven chunks of filesystem whose only other content is the staged files.
+            return 7 * CHUNK - sum(entry.stat(follow_symlinks=False).st_size for entry in os.scandir(directory))
+
+        self.staging.close()
+        self.staging = self.make_staging(capacity_bytes=64 * CHUNK, floor_bytes=2 * CHUNK, free_bytes=free)
+        gateway = self.make_gateway(staging=self.staging)
+        first_data, second_data = payload(3 * CHUNK, b"first"), payload(3 * CHUNK, b"second")
+        first, first_capability = self.ready(first_data, "first")
+        second, second_capability = self.ready(second_data, "second")
+        steps = body_steps(first_data)
+        steps.insert(1, pause(0.5))
+
+        async def overlapping():
+            running = asyncio.create_task(exchange(
+                gateway, "PUT", f"/v1/candidates/{first}/content",
+                self.headers(first_capability, len(first_data)), steps))
+            await asyncio.sleep(0.2)
+            refused = await exchange(gateway, "PUT", f"/v1/candidates/{second}/content",
+                                     self.headers(second_capability, len(second_data)), body_steps(second_data))
+            return await running, refused
+
+        sealed, refused = run(overlapping())
+        self.assertEqual(sealed.status, 202, sealed.text)
+        # One chunk of the first stream was on disk and two were still to come.
+        self.assertEqual(refused.status, 429, refused.text)
+        self.assert_refused(refused, 429, "quota_exceeded")
+        self.assertEqual(self.attempts(second), [(1, "open")])
+        self.assertEqual(self.upload(second, second_capability, second_data, app=gateway).status, 202)
 
     def test_a_full_disk_during_the_stream_refuses_as_unavailable_and_cleans_up(self):
         data = payload(3 * CHUNK)

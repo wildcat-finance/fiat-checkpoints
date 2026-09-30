@@ -3,11 +3,11 @@
 `StagingArea` is one directory on the gateway host, opened once and used only
 through that descriptor. Before a stream reads a byte it reserves its exact
 declared size against the area's capacity, and the filesystem must still keep
-`floor_bytes` free after it. A staged file is created exclusively, without
-following a link, and never grows past its declared size; it is removed when
-its stream ends, however it ends. Files left by a process that stopped are
-removed when the area opens again and by `sweep`. One gateway process owns one
-area.
+`floor_bytes` free once every live stream has written its whole declared size.
+A staged file is created exclusively, without following a link, and never
+grows past its declared size; it is removed when its stream ends, however it
+ends. Files left by a process that stopped are removed when the area opens
+again and by `sweep`. One gateway process owns one area.
 
 `stage_sealed` is the staging broker's read: the sealed quarantine object, by
 its recorded key, copied into an exclusive read-only job file whose bytes are
@@ -76,7 +76,7 @@ class StagingArea:
         self._free_bytes = free_bytes or self._statvfs_free
         self._lock = threading.Lock()
         self._reserved = 0
-        self._active = set()
+        self._active = {}
         # No stream survives the process that ran it.
         self.sweep()
 
@@ -90,25 +90,32 @@ class StagingArea:
             self._directory = None
 
     def reserve(self, size):
-        """Reserve `size` bytes for one stream, or refuse before any byte is read."""
+        """Reserve `size` bytes for one stream, or refuse before any byte is read.
+
+        Free space already shows what live streams have written, not what they
+        have yet to write, so that remainder is counted as used. It is read
+        before the free space, so a chunk written in between is counted twice
+        rather than not at all.
+        """
         if type(size) is not int or size < 1:
             raise StagingRefusal("staging_unavailable")
         with self._lock:
+            unwritten = sum(max(0, held.size - held.count) for held in self._active.values())
             try:
                 free = self._free_bytes()
             except OSError:
                 raise StagingRefusal("staging_unavailable") from None
-            if self._reserved + size > self.capacity_bytes or free - size < self.floor_bytes:
+            if self._reserved + size > self.capacity_bytes or free - unwritten - size < self.floor_bytes:
                 raise StagingRefusal("staging_full")
-            name = secrets.token_hex(16) + ".part"
+            reservation = Reservation(self, secrets.token_hex(16) + ".part", size)
             self._reserved += size
-            self._active.add(name)
-        return Reservation(self, name, size)
+            self._active[reservation.name] = reservation
+        return reservation
 
     def _release(self, reservation):
         with self._lock:
-            if reservation.name in self._active:
-                self._active.discard(reservation.name)
+            if self._active.get(reservation.name) is reservation:
+                del self._active[reservation.name]
                 self._reserved -= reservation.size
 
     def _unlink(self, name):
