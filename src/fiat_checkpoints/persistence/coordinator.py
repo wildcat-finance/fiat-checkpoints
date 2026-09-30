@@ -38,6 +38,8 @@ if not LOGGER.handlers:
     LOGGER.addHandler(logging.NullHandler())
 MAX_UPLOAD_ATTEMPTS = 16
 MAX_VALIDATION_ATTEMPTS = 4096
+# Each open upload attempt holds one stream, so at most `streams_global` exist.
+MAX_STREAM_RECLAIMS = 64
 # Before an intent exists nothing can have reached a signer, so the service's
 # own cancellation is the only cancellation there is (see the decision record).
 LOCALLY_EXPIRABLE = ("announced", "uploading", "quarantined", "validating")
@@ -228,6 +230,33 @@ class Coordinator:
                 return CoordinationRefusal("quota_exceeded")
         return None
 
+    def _reclaim_expired_streams(self, connection, events, now):
+        """Abandon upload attempts whose lease has expired and release their streams.
+
+        A stream counts against the concurrency ceilings only while its lease
+        lives. Otherwise an upload that stopped without sealing kept its slot
+        until the same candidate began again or reached its 24-hour deadline,
+        and abandoned uploads refused every other stream. A candidate another
+        call holds is skipped rather than waited on, so the candidate-first
+        lock order holds; its attempt is still open after the lock only if
+        nothing sealed or replaced it meanwhile.
+        """
+        expired = connection.execute(
+            "SELECT candidate_id FROM upload_attempts WHERE state = 'open' AND lease_expires_at <= %s "
+            "ORDER BY lease_expires_at LIMIT %s", (now, MAX_STREAM_RECLAIMS)).fetchall()
+        for item in expired:
+            row = connection.execute("SELECT * FROM candidates WHERE candidate_id = %s FOR UPDATE SKIP LOCKED",
+                                     (item["candidate_id"],)).fetchone()
+            if row is None:
+                continue
+            for attempt in connection.execute(
+                    "UPDATE upload_attempts SET state = 'abandoned', updated_at = %s WHERE candidate_id = %s "
+                    "AND state = 'open' AND lease_expires_at <= %s RETURNING attempt_number, fence",
+                    (now, row["candidate_id"], now)).fetchall():
+                self._release(connection, events, row, now, kinds=("stream",), attempt=attempt["attempt_number"])
+                events.add("lease-expired", logging.WARNING, candidate=str(row["candidate_id"]), kind="upload",
+                           attempt=attempt["attempt_number"], fence=attempt["fence"])
+
     def _reserve_stream(self, connection, events, actor_id):
         for scope, key, limit in (("global", 0, self.quotas.streams_global),
                                   ("actor", actor_id, self.quotas.streams_per_actor)):
@@ -354,7 +383,8 @@ class Coordinator:
         The caller names `RUN_GRANT` after checking it; the candidate's quota
         reservation and exact declared size and digest are checked here. A
         live lease makes a second begin `upload_in_progress`; an expired one is
-        abandoned and its stream released before the next attempt.
+        abandoned and its stream released before the next attempt. Expired
+        leases of other candidates give their streams back first.
         """
         if not isinstance(scope, RunScope) or frozenset(caller_evidence) != UPLOAD_CALLER_EVIDENCE:
             raise CoordinationRefusal("transition-evidence")
@@ -390,6 +420,7 @@ class Coordinator:
                 "AND released_at IS NULL", (candidate_id,)).fetchone()
             if reserved is None:
                 raise CoordinationRefusal("state_conflict")
+            self._reclaim_expired_streams(connection, events, now)
             refusal = self._reserve_stream(connection, events, row["actor_id"])
             if refusal is not None:
                 raise refusal

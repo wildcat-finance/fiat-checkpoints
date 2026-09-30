@@ -18,6 +18,14 @@ GRANT = {Evidence.RUN_GRANT}
 WORKER = {Evidence.ISOLATED_WORKER}
 
 
+def outcome(call):
+    """The call's result, or its refusal code, so a wrong refusal fails an assertion."""
+    try:
+        return call()
+    except CoordinationRefusal as error:
+        return error.code
+
+
 class UploadLeaseTests(DatabaseCase):
     def begin(self, candidate, now=T0):
         return self.coordinator.begin_upload(SCOPE, ACTOR, candidate, GRANT, now)
@@ -111,6 +119,36 @@ class UploadLeaseTests(DatabaseCase):
         self.assertEqual(self.coordinator.candidate(SCOPE, ACTOR, str(third)).state, State.ANNOUNCED)
         self.coordinator.seal_upload(leases[0], SIZE, f"{0:064x}", SEAL_CALLER_EVIDENCE, at(1))
         self.begin(third, at(2))
+        self.assert_quota_consistent()
+
+    def test_expired_upload_leases_give_their_streams_to_the_actors_next_candidate(self):
+        stale = [self.begin(self.announce(label=str(index), archive=f"{index:064x}").candidate_id)
+                 for index in range(2)]
+        third = self.announce(label="third", archive="3" * 64).candidate_id
+        with recorded_events() as events:
+            lease = outcome(lambda: self.begin(third, at(1800)))
+        self.assertEqual(getattr(lease, "attempt_number", lease), 1)
+        self.assertEqual([event["event"] for event in events].count("lease-expired"), 2)
+        self.assertEqual(self.scalar("SELECT count(*) FROM upload_attempts WHERE state = 'abandoned'"), 2)
+        self.assertEqual(self.coordinator.usage()["streams"], 1)
+        for index, old in enumerate(stale):
+            with self.subTest(stale=index):
+                self.assertEqual(outcome(lambda: self.coordinator.seal_upload(
+                    old, SIZE, f"{index:064x}", SEAL_CALLER_EVIDENCE, at(1801))), "lease_stale")
+        self.assert_quota_consistent()
+
+    def test_abandoned_uploads_of_other_actors_do_not_hold_the_global_streams(self):
+        for actor in range(4):
+            for index in range(2):
+                candidate = self.announce(label=f"g{actor}-{index}", actor=500 + actor,
+                                          archive=f"{actor * 2 + index:064x}").candidate_id
+                self.coordinator.begin_upload(SCOPE, 500 + actor, candidate, GRANT, T0)
+        fresh = self.announce(label="fresh", archive="f" * 64).candidate_id
+        # While those eight leases live, the global ceiling holds.
+        self.assertEqual(outcome(lambda: self.begin(fresh, at(1799))), "quota_exceeded")
+        lease = outcome(lambda: self.begin(fresh, at(1800)))
+        self.assertEqual(getattr(lease, "attempt_number", lease), 1)
+        self.assertEqual(self.coordinator.usage()["streams"], 1)
         self.assert_quota_consistent()
 
 
