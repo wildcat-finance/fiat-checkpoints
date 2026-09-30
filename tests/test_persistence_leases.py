@@ -210,6 +210,20 @@ class ValidationLeaseTests(DatabaseCase):
         self.assertEqual(self.scalar("SELECT count(*) FROM publication_intents"), 0)
         self.assertEqual(self.scalar("SELECT state FROM candidates"), "validating")
 
+    def test_a_pass_for_other_bytes_leaves_the_lease_able_to_report_a_refusal(self):
+        candidate = self.quarantined()
+        claim = self.claim()
+        other = CheckpointIdentities("b" * 64, "c" * 64, "d" * 64)
+        self.assertEqual(outcome(lambda: self.coordinator.complete_validation(
+            claim.lease, passed(identities=other), at(1))), "identity_mismatch")
+        self.assertEqual(self.scalar("SELECT state FROM outbox_jobs"), "leased")
+        self.assertEqual(self.scalar("SELECT state FROM validation_attempts"), "running")
+        self.assertIsNone(outcome(lambda: self.coordinator.complete_validation(
+            claim.lease, refused("identity_mismatch"), at(2))))
+        self.assertEqual(self.coordinator.candidate(SCOPE, ACTOR, str(candidate)).state, State.REJECTED)
+        self.assertEqual(self.coordinator.usage(), {"candidates": 0, "reserved_bytes": 0, "streams": 0})
+        self.assert_quota_consistent()
+
     def test_a_deterministic_refusal_rejects_and_releases_quota(self):
         candidate = self.quarantined()
         claim = self.claim()

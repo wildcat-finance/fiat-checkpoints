@@ -660,6 +660,9 @@ class Coordinator:
                 return CoordinationRefusal("lease_stale")
             if now >= row["expires_at"]:
                 return CoordinationRefusal("candidate_expired")
+            if isinstance(outcome, Passed) and outcome.identities.archive_sha256 != row["archive_sha256"]:
+                # Checked before any write, so the lease can still report a refusal or an outage.
+                return CoordinationRefusal("identity_mismatch")
             if isinstance(outcome, Unavailable):
                 connection.execute("UPDATE validation_attempts SET state = 'retry', updated_at = %s "
                                    "WHERE candidate_id = %s AND attempt_number = %s",
@@ -677,8 +680,6 @@ class Coordinator:
                                  "candidate-rejected", terminal_code=outcome.code, retry_reason=None)
                 self._release(connection, events, row, now)
                 return None
-            if outcome.identities.archive_sha256 != row["archive_sha256"]:
-                return CoordinationRefusal("identity_mismatch")
             intent_id = uuid.uuid4()
             connection.execute(
                 "INSERT INTO publication_intents (intent_id, candidate_id, validation_attempt, fence, archive_sha256, "
