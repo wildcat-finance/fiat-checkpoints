@@ -226,6 +226,17 @@ class ValidationLeaseTests(DatabaseCase):
         self.assertEqual(self.coordinator.usage(), {"candidates": 0, "reserved_bytes": 0, "streams": 0})
         self.assert_quota_consistent()
 
+    def test_a_replayed_pass_for_other_bytes_is_not_the_recorded_intent(self):
+        self.quarantined()
+        claim = self.claim()
+        recorded = self.coordinator.complete_validation(claim.lease, passed(), at(1))
+        other = CheckpointIdentities(IDENTITIES.snapshot_id, IDENTITIES.controller_manifest_sha256, "d" * 64)
+        self.assertEqual(outcome(lambda: self.coordinator.complete_validation(
+            claim.lease, passed(identities=other), at(2))), "identity_mismatch")
+        self.assertEqual(self.coordinator.complete_validation(claim.lease, passed(), at(3)),
+                         IntentRecorded(recorded.intent_id, True))
+        self.assertEqual(self.query("SELECT archive_sha256 FROM publication_intents"), [{"archive_sha256": DIGEST}])
+
     def test_a_deterministic_refusal_rejects_and_releases_quota(self):
         candidate = self.quarantined()
         claim = self.claim()

@@ -661,6 +661,11 @@ class Coordinator:
             if row is None:
                 return CoordinationRefusal("lease_stale")
             if isinstance(outcome, Passed):
+                if outcome.identities.archive_sha256 != row["archive_sha256"]:
+                    # Checked before the replay match and before any write: a pass for
+                    # other bytes never reads as recorded, and the lease can still
+                    # report a refusal or an outage.
+                    return CoordinationRefusal("identity_mismatch")
                 existing = connection.execute(
                     "SELECT intent_id, fence, validation_attempt, evidence_sha256, snapshot_id, "
                     "controller_manifest_sha256 FROM publication_intents WHERE candidate_id = %s",
@@ -686,9 +691,6 @@ class Coordinator:
                 return CoordinationRefusal("lease_stale")
             if now >= row["expires_at"]:
                 return CoordinationRefusal("candidate_expired")
-            if isinstance(outcome, Passed) and outcome.identities.archive_sha256 != row["archive_sha256"]:
-                # Checked before any write, so the lease can still report a refusal or an outage.
-                return CoordinationRefusal("identity_mismatch")
             if isinstance(outcome, Unavailable):
                 connection.execute("UPDATE validation_attempts SET state = 'retry', updated_at = %s "
                                    "WHERE candidate_id = %s AND attempt_number = %s",
