@@ -106,6 +106,5 @@ The hashes establish the bytes present at startup. They do not establish that
 the process's dynamic libraries or the image's OpenSSL are trustworthy; the
 base image digest carries that trust. A root-owned read-only tree is hashed
 once at startup, just before the import, and nothing rechecks it afterwards.
-Native executable pins for Python, Git and GnuPG come with the
-validator image in Step 6; until then the native tree is checked by file hash
-only.
+Native executable pins for Python, Git and GnuPG come with the validator image
+in Step 6; until then the native tree is checked by file hash only.

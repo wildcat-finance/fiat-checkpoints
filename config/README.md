@@ -27,9 +27,9 @@ parent directory remains outside the final-component symlink check.
 Production returns fixed startup codes for test trust, a missing or refused
 protocol pin and unavailable isolation, plus `scaffold-only`. A lock or tree
 that fails its check adds its own `protocol-*` code. Even a passing lock cannot
-enable production while isolation is unavailable. Health reveals neither configuration nor
-private inventory. The production configuration fields in specification
-section 18 remain prerequisites for later implementation.
+enable production while isolation is unavailable. Health reveals neither
+configuration nor private inventory. The production configuration fields in
+specification section 18 remain prerequisites for later implementation.
 
 Three questions govern local events: did the process start, is admission
 available, and how long did a health request take? `local-health-starting`,
