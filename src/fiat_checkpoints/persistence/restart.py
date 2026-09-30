@@ -17,7 +17,7 @@ from fiat_checkpoints.persistence.coordinator import (
     PASS_CALLER_EVIDENCE, SEAL_CALLER_EVIDENCE, Coordinator, IntentRecorded, Passed,
 )
 from fiat_checkpoints.persistence.database import Database
-from fiat_checkpoints.persistence.migrations import migrate
+from fiat_checkpoints.persistence.migrations import load_migrations, migrate
 from fiat_checkpoints.persistence.scratch import ScratchDatabase
 
 
@@ -84,7 +84,8 @@ def observe():
     """Run the scenario once and return each named observation."""
     observations = {}
     with ScratchDatabase() as scratch:
-        observations["first-migration"] = migrate(scratch.database) == (1,)
+        shipped = tuple(item.version for item in load_migrations())
+        observations["first-migration"] = migrate(scratch.database) == shipped
         before = Coordinator(scratch.database)
         uploading = before.announce(SCOPE, 11, "restart-upload-key", AnnounceRequest(DIGEST, SIZE, {}), T0)
         stale_upload = before.begin_upload(SCOPE, 11, uploading.candidate_id, {Evidence.RUN_GRANT}, T0)

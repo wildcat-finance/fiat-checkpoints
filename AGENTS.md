@@ -11,8 +11,9 @@ appended. Controller records under `.hexaemeron/` stay local and untracked.
 
 ## Current boundary
 
-The scaffold, the pinned protocol and PostgreSQL coordination are implemented;
-SQL coordinates work and never records acceptance. Production startup and
+The scaffold, the pinned protocol, PostgreSQL coordination and contributor
+authentication with upload endorsement are implemented; SQL coordinates work
+and never records acceptance or authority. Production startup and
 readiness stay closed. `protocol.lock.json` and `protocol.trees.json` change
 only with a new protocol release; regenerate the manifest with
 `scripts/protocol_trees.py manifest`. Call the released library for records,
@@ -30,9 +31,9 @@ Linux test image, never on a macOS host:
 group is a new `tests/test_<group>*.py` module; `scripts/check.py` itself is
 pinned by the runbook. A test class that starts a child process sets
 `spawns_child_process = True`. Missing groups, zero tests and skips refuse
-success. The `persistence` and `concurrency` groups need
-`scripts/linux-env.sh db-start` first. Keep a failure's evidence and find its
-cause before changing code.
+success. The `persistence`, `concurrency`, `auth` and `endorsement` groups
+need `scripts/linux-env.sh db-start` first. Keep a failure's evidence and find
+its cause before changing code.
 
 ## Records and data
 

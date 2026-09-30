@@ -18,6 +18,14 @@ from tests.persistence_support import T0, DatabaseCase, passed, run_threads
 
 
 ROOT = Path(__file__).resolve().parents[1]
+# Later steps add migrations; these checks follow the shipped set and write
+# their own specimens as the next version after it.
+SHIPPED = tuple(item.version for item in load_migrations())
+NEXT = len(SHIPPED) + 1
+
+
+def next_name(label, version=NEXT):
+    return f"{version:04d}_{label}.sql"
 
 
 class MigrationDirectory:
@@ -66,7 +74,7 @@ class MigrationTests(ScratchCase):
             self.assertEqual(item.sha256, hashlib.sha256(raw).hexdigest())
 
     def test_fresh_database_migrates_once_and_a_restart_is_a_no_op(self):
-        self.assertEqual(migrate(self.database), (1,))
+        self.assertEqual(migrate(self.database), SHIPPED)
         before = self.ledger()
         self.assertEqual(before[0][:2], (1, "coordination"))
         # A restarted process runs the same migrations again and changes nothing.
@@ -78,20 +86,20 @@ class MigrationTests(ScratchCase):
 
     def test_a_failing_migration_leaves_nothing_and_a_rerun_completes(self):
         directory = MigrationDirectory(self)
-        directory.write("0002_next.sql", "CREATE TABLE half_done (id integer);\nSELECT no_such_function();\n")
+        directory.write(next_name("next"), "CREATE TABLE half_done (id integer);\nSELECT no_such_function();\n")
         with self.assertRaises(PersistenceRefusal) as caught:
             migrate(self.database, directory.path)
         self.assertEqual(caught.exception.code, "persistence_failed")
-        self.assertEqual([row[0] for row in self.ledger()], [1])
+        self.assertEqual([row[0] for row in self.ledger()], list(SHIPPED))
         self.assertNotIn("half_done", self.tables())
-        directory.write("0002_next.sql", "CREATE TABLE half_done (id integer);\n")
-        self.assertEqual(migrate(self.database, directory.path), (2,))
+        directory.write(next_name("next"), "CREATE TABLE half_done (id integer);\n")
+        self.assertEqual(migrate(self.database, directory.path), (NEXT,))
         self.assertIn("half_done", self.tables())
 
     def test_a_connection_killed_mid_migration_rolls_back_and_the_rerun_applies_it(self):
         migrate(self.database)
         directory = MigrationDirectory(self)
-        directory.write("0002_slow.sql", "CREATE TABLE slow_table (id integer);\nSELECT pg_sleep(30);\n")
+        directory.write(next_name("slow"), "CREATE TABLE slow_table (id integer);\nSELECT pg_sleep(30);\n")
         outcome = {}
 
         def run():
@@ -116,16 +124,16 @@ class MigrationTests(ScratchCase):
         thread.join(60)
         self.assertTrue(killed)
         self.assertEqual(outcome.get("code"), "database_unavailable")
-        self.assertEqual([row[0] for row in self.ledger()], [1])
+        self.assertEqual([row[0] for row in self.ledger()], list(SHIPPED))
         self.assertNotIn("slow_table", self.tables())
-        directory.write("0002_slow.sql", "CREATE TABLE slow_table (id integer);\n")
-        self.assertEqual(migrate(self.database, directory.path), (2,))
+        directory.write(next_name("slow"), "CREATE TABLE slow_table (id integer);\n")
+        self.assertEqual(migrate(self.database, directory.path), (NEXT,))
 
     def test_concurrent_runners_apply_each_migration_exactly_once(self):
         results = run_threads(6, lambda _index: migrate(self.database))
         self.assertTrue(all(isinstance(result, tuple) for result in results), results)
-        self.assertEqual(sorted(results), [(), (), (), (), (), (1,)])
-        self.assertEqual([row[0] for row in self.ledger()], [1])
+        self.assertEqual(sorted(results), [(), (), (), (), (), SHIPPED])
+        self.assertEqual([row[0] for row in self.ledger()], list(SHIPPED))
 
     def test_changed_applied_migration_refuses_as_drift(self):
         migrate(self.database)
@@ -138,7 +146,7 @@ class MigrationTests(ScratchCase):
 
     def test_database_newer_than_the_code_refuses(self):
         directory = MigrationDirectory(self)
-        directory.write("0002_future.sql", "CREATE TABLE future_table (id integer);\n")
+        directory.write(next_name("future"), "CREATE TABLE future_table (id integer);\n")
         migrate(self.database, directory.path)
         with self.assertRaises(PersistenceRefusal) as caught:
             migrate(self.database)
@@ -146,13 +154,13 @@ class MigrationTests(ScratchCase):
 
     def test_migration_set_refuses_links_gaps_strays_and_bad_text(self):
         cases = {
-            "gap": lambda path: (path / "0003_gap.sql").write_text("SELECT 1;\n"),
+            "gap": lambda path: (path / next_name("gap", NEXT + 1)).write_text("SELECT 1;\n"),
             "stray": lambda path: (path / "notes.txt").write_text("x"),
             "hidden": lambda path: (path / ".gitkeep").write_text(""),
-            "symlink": lambda path: os.symlink(path / "0001_coordination.sql", path / "0002_link.sql"),
-            "directory": lambda path: (path / "0002_dir.sql").mkdir(),
-            "encoding": lambda path: (path / "0002_bytes.sql").write_bytes(b"\xff\xfe"),
-            "oversize": lambda path: (path / "0002_big.sql").write_bytes(b"-" * 262_145),
+            "symlink": lambda path: os.symlink(path / "0001_coordination.sql", path / next_name("link")),
+            "directory": lambda path: (path / next_name("dir")).mkdir(),
+            "encoding": lambda path: (path / next_name("bytes")).write_bytes(b"\xff\xfe"),
+            "oversize": lambda path: (path / next_name("big")).write_bytes(b"-" * 262_145),
         }
         for label, change in cases.items():
             with self.subTest(case=label):

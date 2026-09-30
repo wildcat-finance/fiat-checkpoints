@@ -36,7 +36,7 @@ FILE_MAX = 67_108_864
 TREE_FILES_MAX = 4_096
 PACKAGE = "plugins/hexaemeron/skills/fiat/scripts/checkpoint_authority"
 NATIVE_PROFILE = "plugins/hexaemeron/skills/fiat/checkpoint-authority/native-profile.json"
-MODULES = ("canonical", "schema", "records", "signatures", "trust", "native_io",
+MODULES = ("canonical", "schema", "records", "signatures", "trust", "eligibility", "native_io",
            "native_records", "native", "parents", "release", "verifier")
 COMMIT = re.compile(r"[0-9a-f]{40}")
 SHA256 = re.compile(r"[0-9a-f]{64}")

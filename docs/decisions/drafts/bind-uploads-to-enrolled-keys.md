@@ -1,0 +1,211 @@
+# Decision: Bind each upload to a numeric login, an operator-enrolled key and one signed endorsement
+
+## Status
+
+Accepted, 2026-09-30. Covers login, sessions, access tokens and CSRF, each
+run's authorization projection, proof of possession, the exact-upload
+endorsement and the historical-signer check. Upload transfer belongs to Step 5
+and validation to Step 6.
+
+## Context
+
+Specification section 8 fixes the identity rules: a dedicated GitHub App
+login, the immutable numeric user id from authenticated `GET /user`, Secure,
+HttpOnly and SameSite cookies with CSRF protection, and 15-minute CLI tokens.
+Login state lasts five minutes, is used once and binds one browser. Logout
+revokes sessions. Enrollment needs an authenticated identity, a
+challenge, proof of possession and a signed operator approval. The upload
+endorsement, signed by the enrolled key, binds actor, candidate, run, the
+three checkpoint identities, carrier length, parent link, nonce and expiry.
+Section 11 makes PostgreSQL coordination, never authority.
+
+The released library already checks enrollment, grants, revocations and
+endorsement signatures (`TrustPrefix`, `grant_at`, `signing_history`). The
+test environment has no network, and this packet deploys no identity
+provider (Skills #863).
+
+## Decision
+
+### Identity
+
+`auth/identity.py` defines the provider seam: `authorization_url(state,
+code_challenge)` and `user_document(code, code_verifier)`. The adapter
+exchanges the code server-side, calls `GET /user`, discards the user token and
+returns the response body. The service reads one field from it, the integer
+`id`. A duplicate key, a string, boolean or float id, or a missing id refuses.
+No login name, email or provider token is stored or accepted as a credential.
+PKCE uses `S256`; its verifier is derived from the login state and browser
+binding, so nothing extra is stored.
+
+No live adapter ships. `create_intake_app` refuses production with the same
+startup codes as the health app, including `scaffold-only`. The GitHub App
+login adapter goes to a new fiat-checkpoints issue filed at integration;
+Skills #863 keeps its live proof. A live adapter
+names its client secret as `secret:<name>` and reads the value at exchange
+time from `/run/secrets/fiat-checkpoints/<name>`: one link, a regular file, at
+most 4,096 bytes, never logged or repeated in an error.
+
+### Session custody
+
+| Secret | Lifetime | Stored as | Carried as |
+| --- | --- | --- | --- |
+| Login state and browser binding | 5 minutes, spent on first presentation | SHA-256 | Query `state`; `__Host-fiat-login`, SameSite=Lax |
+| Session | 8 hours, absolute | SHA-256 | `__Host-fiat-session`, Secure, HttpOnly, SameSite=Strict |
+| CSRF token | The session's | Not stored; derived from the session secret | `X-CSRF-Token` on every unsafe browser request |
+| Access token | At most 15 minutes, never past its session | SHA-256 | `Authorization: Bearer` only, bound to service and environment |
+
+Every secret is 32 random bytes. A presented value of any other shape refuses
+before a lookup, so a pasted personal token never reaches a query. Renewal
+spends the presented token, and pairing or renewal needs a current grant in
+some allowlisted run. Logout revokes the session and every token paired from
+it. Ceilings: 10,000 live login states, 16 live sessions per actor (the oldest
+is revoked), 8 live tokens per session. Expired or revoked rows never count.
+An unauthenticated flood of about 33 login starts per second can hold the
+login-state ceiling and refuse every login for up to 300 seconds, while issued
+sessions keep working. The ceiling protects the database; per-client limits
+belong to the deployment edge (accepted 2026-09-30).
+The specification sets no browser session lifetime; eight hours covers a
+working day, and a table check pins it.
+
+### Run authorization
+
+Each allowlisted run has external roots and a trust prefix of operator-signed
+records, stored byte for byte in `trust_records`, at most 256 per run. Each
+request reads the stored head. When the head differs from the cached
+projection, the whole prefix is verified again from the roots through the
+released `TrustPrefix`, and a stored row that fails refuses as
+`authority_unavailable`. Ingestion verifies the new record at the end of the
+verified prefix and writes it only if the head has not moved, holding the run
+row. Announce needs `announce`, the endorsement's own grant `upload`, status
+`read_status`, each checked by the released `grant_at` at the service clock.
+A key revocation or an expired grant takes effect at the next request. A run
+whose stored records no longer verify freezes that run only. The ingestion
+method has no HTTP route yet: `POST /internal/v1/authority-records` goes to
+the same new fiat-checkpoints issue, and Skills #863 keeps its live proof.
+
+### Proof of possession
+
+The contributor signs the protocol's proof message over the operator-signed
+enrollment challenge. The service accepts the proof only from the
+authenticated actor the challenge names, verifies it with the released
+signature check and records it for the operator. Recording grants nothing. The
+operator's key enrollment embeds the proof, and `TrustPrefix` verifies it
+again. A key that signs its own enrollment or challenge refuses as
+`issuer-untrusted`, and an endorsement from an unenrolled key refuses as
+`signer_not_enrolled`. The API role pins OpenSSL alone, so it verifies
+`spki-p256` keys only; Step 6 pins ssh-keygen and gpg in the validator role
+(Laurence, 2026-09-30).
+
+### Exact-upload endorsement
+
+Announce binds a 64-hex nonce and the snapshot, manifest and parent digests
+beside the candidate as its first challenge. The library authenticates the
+endorsement with the enrolled key and checks enrollment and grant at its
+`issued_at`. The service then compares actor, candidate, the nonce of the
+challenge it names, run, the three identities by role, length and parent. It
+requires `issued_at` from that challenge's second up to now, an unexpired
+endorsement and the named grant current now. The endorsement is recorded once
+per challenge, only while the trust head is unchanged.
+
+A candidate can be endorsed again before signer authorization. Once an
+endorsement has spent the candidate's challenge, a replayed announce issues
+the next challenge with a fresh nonce. That holds while the candidate is
+unexpired and before signer authorization, up to 288 challenges: one
+300-second endorsement after another across the 24-hour candidate lifetime.
+The latest recorded endorsement is the bound one while it is unexpired;
+`EndorsementStore.bound` refuses it once expired, or once it would expire
+before the instant its caller needs, and an earlier endorsement is never bound
+again. An exact replay of the bound envelope returns the recorded result.
+Another envelope for a spent challenge, an endorsement over an earlier
+challenge and a replay of an earlier endorsement refuse.
+
+| Refusal | Code |
+| --- | --- |
+| Actor, identity or length differs | 422 `identity_mismatch` |
+| Candidate, nonce, run, parent, time or signature differs; grant not current; challenge spent or earlier; endorsement earlier or expired | 422 `endorsement_invalid` |
+| Signing key has no live enrollment for the actor | 422 `signer_not_enrolled` |
+| Another actor's candidate, or no current grant | 404 `not_found` |
+| Trust head moved before the commit, or database outage | 503 `policy_unavailable` |
+| The candidate's 288th challenge is spent | 429 `quota_exceeded` |
+
+A 422 carries the library's own `protocol_code` when the library produced it.
+Any unexpected failure is 503 `authority_unavailable` with no text.
+
+Sections 13 and 16 ask a client to wait a bounded time before retrying and
+give no value. This service chooses `Retry-After: 60` for 429 `quota_exceeded`
+and `Retry-After: 30` for every 503, each with the same `retry_after_seconds`
+in the body, and `retry_after_seconds: 30` in the status of a candidate it is
+retrying after a dependency failure. Both stay under Step 3's 300-second
+retry cap.
+
+### Historical signers
+
+`Projection.historical_signers` resolves each enrollment reference and signing
+fingerprint through the released `signing_history` in this run's prefix and
+requires that enrollment's key to have that fingerprint. A carried key,
+another run's enrollment or a fabricated reference refuses as
+`signer_not_enrolled`. A later revocation stays visible in the returned
+history. Step 6 builds the native `ApprovedRun` rows from it.
+
+## Signals
+
+| Question | Event |
+| --- | --- |
+| Is authorization current? | `trust-projection-verified` with record count and duration; `trust-projection-refused` at error level; `authority-record-ingested` with record type and sequence; `authority-record-refused` |
+| Why was a request refused? | `intake-request` with route template, status, fixed code, reason and any library code |
+| Who holds sessions? | `session-opened` and `access-token-issued` with eviction counts; `session-revoked` |
+| Was an endorsement bound? | `endorsement-verified` with the random candidate id and `recorded` or `replayed` |
+
+No event carries an actor id, session id, digest, key, nonce or secret.
+
+## Request bounds
+
+The checks measure bounds and predict no latency. A control body is at most
+65,536 bytes, and a streamed body is refused within one 16 KiB chunk of that.
+With a current projection, one endorsement starts exactly one verifier
+process. Rebuilding a four-record prefix with one enrollment starts five, and
+ingesting a fifth record starts six. A run holds at most 256 trust records.
+
+## Alternatives
+
+- Trust the login name or email. Rejected: renames would move authority, and
+  section 8 forbids it.
+- Stateless signed session tokens. Rejected: logout could not revoke them, and
+  the service would hold a signing key.
+- A stored or double-submit CSRF token. Rejected: the derived token needs
+  neither storage nor a key.
+- Treat grant rows in SQL as authority. Rejected by section 11.
+- A service-made enrollment challenge with its own proof format. Rejected: the
+  protocol's challenge is operator-signed, and a second format would split
+  proof checking.
+- Verify the full prefix on every request. Rejected: one process start per
+  record per request; the cache follows the head, whose tail digest commits to
+  the whole prefix through each predecessor link.
+- One endorsement per candidate. Rejected: the released replay requires an
+  acceptance issued inside its endorsement's validity, at most 300 seconds,
+  and one validation job may take 900. A fresh challenge for each endorsement
+  keeps every nonce single-use and every replay unambiguous.
+- A separate route that issues a new challenge. Rejected: section 13's
+  announce already returns the candidate's challenge, so a replayed announce
+  issues the next one without a new route or state.
+- A base64url nonce. Rejected after an observed failure: one nonce in about 32
+  starts with `-` or `_`, which the released ID pattern refuses as
+  `schema-pattern`.
+
+## Consequences
+
+Step 5 can issue a capability from the bound endorsement after checking the
+grant again, and Step 6 takes historical signers from the same projection.
+Each head change costs one full prefix verification, bounded by 256 records.
+Announce checks its grant when the request starts, so a revocation just before
+it commits still leaves a candidate, but no endorsement for it can be recorded.
+A stolen login state can burn a login but cannot open a session.
+`scripts/serve.py` still serves health only; the intake app is built with
+explicit services.
+
+The released replay requires an acceptance to be issued inside its
+endorsement's validity, at most five minutes. Issue #2 therefore signs only
+against `EndorsementStore.bound` with the acceptance time as its `until`,
+checked again under the candidate lock, and asks the contributor to endorse
+again when that endorsement has expired or would expire first. No decision
+intent in this packet carries an endorsement digest.
