@@ -1,5 +1,8 @@
 """Races between concurrent callers, each on its own connection and thread."""
 
+import threading
+import time
+
 from fiat_checkpoints.domain.coordination import CoordinationRefusal, QuotaPolicy, RunScope
 from fiat_checkpoints.domain.transitions import Evidence
 from fiat_checkpoints.persistence.coordinator import SEAL_CALLER_EVIDENCE, IntentRecorded
@@ -89,6 +92,34 @@ class LeaseRaceTests(DatabaseCase):
         self.assertEqual({claim.lease.candidate_id for claim in claims}, candidates)
         self.assertEqual(len(claims), 3)
         self.assertEqual(self.scalar("SELECT count(*) FROM validation_attempts WHERE state = 'running'"), 3)
+
+    def test_a_claim_never_holds_a_job_while_it_waits_for_that_jobs_candidate(self):
+        # Completions and the sweep lock the candidate, then its job; a claim
+        # holding the job while it waits for the candidate closes a cycle.
+        candidate = self.quarantined()
+        holder = self.database.connect()
+        probe = self.database.connect()
+        result = {}
+        try:
+            holder.execute("BEGIN")
+            holder.execute("SELECT 1 FROM candidates WHERE candidate_id = %s FOR UPDATE", (candidate,))
+            claimer = threading.Thread(target=lambda: result.setdefault(
+                "claim", self.coordinator.claim_validation(WORKER, at(1))))
+            claimer.start()
+            deadline = time.monotonic() + 30
+            while claimer.is_alive() and time.monotonic() < deadline and not probe.execute(
+                    "SELECT count(*) AS n FROM pg_stat_activity WHERE datname = %s AND wait_event_type = 'Lock'",
+                    (self.database.dbname,)).fetchone()["n"]:
+                time.sleep(0.02)
+            unlocked = probe.execute("SELECT job_id FROM outbox_jobs FOR UPDATE SKIP LOCKED").fetchall()
+            holder.execute("ROLLBACK")
+            claimer.join(30)
+        finally:
+            holder.close()
+            probe.close()
+        self.assertEqual(len(unlocked), 1)
+        self.assertIsNone(result.get("claim"))
+        self.assertEqual(self.coordinator.claim_validation(WORKER, at(2)).lease.candidate_id, candidate)
 
     def test_unique_intent_contention_between_a_stale_and_a_current_worker(self):
         self.quarantined()

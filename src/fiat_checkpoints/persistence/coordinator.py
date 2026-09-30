@@ -40,6 +40,8 @@ MAX_UPLOAD_ATTEMPTS = 16
 MAX_VALIDATION_ATTEMPTS = 4096
 # Each open upload attempt holds one stream, so at most `streams_global` exist.
 MAX_STREAM_RECLAIMS = 64
+# A claim that loses its job to a concurrent claim looks again this many times.
+MAX_CLAIM_PASSES = 8
 # Before an intent exists nothing can have reached a signer, so the service's
 # own cancellation is the only cancellation there is (see the decision record).
 LOCALLY_EXPIRABLE = ("announced", "uploading", "quarantined", "validating")
@@ -149,8 +151,15 @@ class Coordinator:
 
     def _run(self, work):
         events = _Events()
+
+        def attempt(connection):
+            # A deadlock reruns the whole call; the rolled-back attempt's events
+            # describe nothing that committed.
+            events.items.clear()
+            return work(connection, events)
+
         try:
-            result = self.database.transaction(lambda connection: work(connection, events))
+            result = self.database.transaction(attempt)
         except CoordinationRefusal:
             events.emit(refused=True)
             raise
@@ -507,15 +516,32 @@ class Coordinator:
 
     @staticmethod
     def _next_job(connection, kind, now):
+        """Lock the next ready job's candidate, then the job, or return None.
+
+        Every other call locks a candidate before its job. A claim that locked
+        the job first could wait on a completion or sweep holding the
+        candidate while that call waited on the job, a deadlock. A candidate
+        another call holds is skipped; the job is read again after its
+        candidate is locked, because another claim may have leased it first.
+        """
         # Validation is new work, which a passed deadline blocks; a hand-off
         # job after the intent is not, and its owner decides cancellation.
         deadline = now if kind == "validate-candidate" else None
-        return connection.execute(
-            "SELECT j.* FROM outbox_jobs j JOIN candidates c USING (candidate_id) WHERE j.kind = %s "
-            "AND ((j.state = 'pending' AND j.available_at <= %s) OR (j.state = 'leased' AND j.lease_expires_at <= %s)) "
-            "AND (%s::timestamptz IS NULL OR c.expires_at > %s) ORDER BY j.available_at, j.job_id LIMIT 1 "
-            "FOR UPDATE OF j SKIP LOCKED",
-            (kind, now, now, deadline, deadline)).fetchone()
+        ready = ("j.kind = %(kind)s AND ((j.state = 'pending' AND j.available_at <= %(now)s) "
+                 "OR (j.state = 'leased' AND j.lease_expires_at <= %(now)s))")
+        for _ in range(MAX_CLAIM_PASSES):
+            found = connection.execute(
+                "SELECT j.job_id FROM outbox_jobs j JOIN candidates c USING (candidate_id) WHERE " + ready
+                + " AND (%(deadline)s::timestamptz IS NULL OR c.expires_at > %(deadline)s) "
+                "ORDER BY j.available_at, j.job_id LIMIT 1 FOR UPDATE OF c SKIP LOCKED",
+                {"kind": kind, "now": now, "deadline": deadline}).fetchone()
+            if found is None:
+                return None
+            job = connection.execute("SELECT j.* FROM outbox_jobs j WHERE j.job_id = %(job_id)s AND " + ready
+                                     + " FOR UPDATE", {"kind": kind, "now": now, "job_id": found["job_id"]}).fetchone()
+            if job is not None:
+                return job
+        return None
 
     def _schedule_retry(self, connection, events, job, row, reason, now):
         attempts = job["attempts"] + 1

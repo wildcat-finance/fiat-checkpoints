@@ -3,6 +3,8 @@
 from dataclasses import replace
 import uuid
 
+from psycopg import errors
+
 from fiat_checkpoints.domain.coordination import CoordinationRefusal, LeasePolicy
 from fiat_checkpoints.domain.identities import CheckpointIdentities
 from fiat_checkpoints.domain.transitions import Evidence, State
@@ -366,6 +368,25 @@ class EventTests(DatabaseCase):
         audit = [row["event"] for row in self.query("SELECT event FROM audit_events ORDER BY event_id")]
         self.assertEqual(audit, ["candidate-announced", "upload-started", "upload-sealed", "validation-started",
                                  "intent-recorded"])
+
+    def test_a_call_rerun_after_a_deadlock_logs_only_the_attempt_that_committed(self):
+        transaction, failed = self.database.transaction, []
+
+        def deadlock_once(work):
+            def attempt(connection):
+                result = work(connection)
+                if not failed:
+                    failed.append(True)
+                    raise errors.DeadlockDetected()
+                return result
+            return transaction(attempt)
+
+        self.database.transaction = deadlock_once
+        with recorded_events() as events:
+            self.announce()
+        self.assertEqual(failed, [True])
+        self.assertEqual([event["event"] for event in events], ["candidate-announced"])
+        self.assertEqual(self.scalar("SELECT count(*) FROM candidates"), 1)
 
     def test_a_rolled_back_call_logs_only_its_refusal(self):
         for index in range(5):
