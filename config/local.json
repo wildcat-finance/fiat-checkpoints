@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "profile": "local",
+  "service_id": "fiat-checkpoints",
+  "environment_id": "fiat-checkpoints-local",
+  "host": "127.0.0.1",
+  "port": 8000,
+  "trust_profile": "local-test",
+  "protocol_lock": null,
+  "sandbox_profile": "unavailable",
+  "request_max_bytes": 65536,
+  "carrier_max_bytes": 1073741824,
+  "validation_concurrency": 1
+}
