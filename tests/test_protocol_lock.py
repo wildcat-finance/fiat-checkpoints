@@ -1,11 +1,15 @@
 """The shipped lock, the read-only trees and production startup without them."""
 
 from dataclasses import replace
+import importlib.util
 import json
+import marshal
 import os
 from pathlib import Path
 import re
 import shutil
+import struct
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -237,6 +241,26 @@ class TreeCustodyTests(unittest.TestCase):
         planted = self.authority / fixtures.RELEASED.replace("checkpoint-authority/", "scripts/checkpoint_authority/")
         (planted / "planted.py").write_text("raise SystemExit(9)\n")
         self.assertEqual(self.refusal().code, "protocol-tree-extra")
+
+    def test_bytecode_outside_the_tree_is_never_imported(self):
+        # S2-R1-02: a planted pyc under a pycache prefix must not replace hashed source.
+        source = self.authority / "plugins/hexaemeron/skills/fiat/scripts/checkpoint_authority/canonical.py"
+        prefix = self.base / "pycache"
+        previous = sys.pycache_prefix
+        self.addCleanup(setattr, sys, "pycache_prefix", previous)
+        sys.pycache_prefix = str(prefix)
+        cache = Path(importlib.util.cache_from_source(str(source)))
+        stat_result = source.stat()
+        code = compile(source.read_bytes() + b"\nPLANTED = True\n", str(source), "exec")
+        cache.parent.mkdir(parents=True)
+        cache.write_bytes(importlib.util.MAGIC_NUMBER + struct.pack(
+            "<III", 0, int(stat_result.st_mtime) & 0xFFFFFFFF, stat_result.st_size & 0xFFFFFFFF)
+            + marshal.dumps(code))
+        fixtures.make_read_only(self.trees)
+        release = load_release(ROOT, self.trees)
+        self.assertEqual(release.lock_check["code"], "lock-agrees")
+        self.assertFalse(hasattr(release.library.canonical, "PLANTED"))
+        self.assertEqual(sys.pycache_prefix, str(prefix))
 
     def test_changed_authority_file_refuses(self):
         path = self.authority / "plugins/hexaemeron/skills/fiat/scripts/checkpoint_authority/trust.py"

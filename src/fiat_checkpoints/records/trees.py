@@ -213,8 +213,11 @@ def _import(root, trees_sha256):
             return _LOADED[key]
         name = "_fiat_checkpoints_authority_" + hashlib.sha256(repr(key).encode()).hexdigest()[:16]
         package = root / PACKAGE
-        previous = sys.dont_write_bytecode
-        sys.dont_write_bytecode = True
+        previous = sys.dont_write_bytecode, sys.pycache_prefix
+        # A pycache prefix would let bytecode from outside the hashed tree stand in
+        # for its source; without one, the only cache is the tree's own
+        # `__pycache__`, which the inventory refuses (S2-R1-02).
+        sys.dont_write_bytecode, sys.pycache_prefix = True, None
         try:
             spec = importlib.util.spec_from_file_location(
                 name, package / "__init__.py", submodule_search_locations=[str(package)])
@@ -227,7 +230,7 @@ def _import(root, trees_sha256):
                 del sys.modules[loaded]
             raise RecordRefusal("protocol-import-failed") from None
         finally:
-            sys.dont_write_bytecode = previous
+            sys.dont_write_bytecode, sys.pycache_prefix = previous
         _LOADED[key] = library
         return library
 
