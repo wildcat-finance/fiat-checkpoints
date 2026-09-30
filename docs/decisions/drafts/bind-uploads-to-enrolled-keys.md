@@ -59,7 +59,7 @@ before a lookup, so a pasted personal token never reaches a query. Renewal
 spends the presented token, and pairing or renewal needs a current grant in
 some allowlisted run. Logout revokes the session and every token paired from
 it. Ceilings: 10,000 live login states, 16 live sessions per actor (the oldest
-is revoked), 8 live tokens per session. Expired or revoked rows never count.
+is revoked), 8 live tokens per session. Expired or revoked rows never count. An unauthenticated flood of about 33 login starts per second can hold the login-state ceiling, refusing every login for up to 300 seconds while issued sessions keep working; the ceiling protects the database, and per-client limits belong to the deployment edge (accepted 2026-09-30).
 The specification sets no browser session lifetime; eight hours covers a
 working day, and a table check pins it.
 
