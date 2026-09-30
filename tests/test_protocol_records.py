@@ -360,6 +360,31 @@ class ParentAndCustodyTests(unittest.TestCase):
             with self.subTest(code=code, entries=len(entries)):
                 self.assertEqual(self.refusal(lambda: self.records.check_custody(value, entries)), code)
 
+    def test_malformed_shapes_leave_as_fixed_service_codes(self):
+        # S2-R1-01: the library raises KeyError, TypeError or AttributeError on
+        # shapes it never checks; none may leave the records boundary.
+        state = self.custody_state()
+        cases = (
+            ("validation_failed", lambda: self.records.check_custody(state, ["entry"])),
+            ("validation_failed", lambda: self.records.check_custody(state, [{"data": {}}])),
+            ("validation_failed", lambda: self.records.check_custody(state, [{"event": "record", "data": []}])),
+            ("validation_failed", lambda: self.records.check_custody([], [])),
+            ("authority_unavailable", lambda: self.records.check_parent({}, {}, {}, {}, {}, "d" * 64)),
+        )
+        for code, operation in cases:
+            with self.subTest(code=code):
+                try:
+                    operation()
+                except Exception as error:  # the unfixed boundary leaks the library's exception
+                    caught = error
+                else:
+                    self.fail("malformed input was accepted")
+                self.assertIsInstance(caught, RecordRefusal)
+                self.assertEqual(caught.event(), {"event": "record-refused", "code": code,
+                                                  "producer": SERVICE, "protocol_code": None, "stage": None})
+                self.assertIsNone(caught.__cause__)
+                self.assertTrue(caught.__suppress_context__)
+
 
 if __name__ == "__main__":
     unittest.main()

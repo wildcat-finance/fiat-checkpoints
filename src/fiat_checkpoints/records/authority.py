@@ -4,7 +4,9 @@ Nothing here defines a record, a signature rule or a trust rule: the pinned
 `checkpoint_authority` package does. This module fixes the service inputs
 (scope, external roots, tool pins), bounds what reaches the library and keeps
 the exact envelope bytes the service received. Every library refusal leaves as
-`protocol_refused` carrying the library's own code and stage.
+`protocol_refused` carrying the library's own code and stage. Any other
+exception a malformed input raises inside the library leaves as one fixed
+service code with no protocol code, message or traceback.
 """
 
 from dataclasses import dataclass
@@ -17,6 +19,8 @@ OPENSSL_PATH = "/usr/bin/openssl"
 # OpenSSL 3.5.6 as shipped in the digest-pinned python:3.14.6-slim-trixie base image.
 OPENSSL_SHA256 = "38633817061f9d161c8b14c1ff72c9f223e8208d977a4c15d843010611a5dded"
 ENVIRONMENTS = ("test", "production")
+# The library refuses by `Refusal`; these are what it raises on a shape it never checked.
+UNEXPECTED = (LookupError, TypeError, AttributeError, ValueError, RecursionError)
 
 
 @dataclass(frozen=True)
@@ -71,11 +75,14 @@ class AuthorityRecords:
             scope.environment, scope.service, scope.repository_id, scope.run_id, roots)
         self._call(lambda: self.library.trust.TrustPrefix(self.bootstrap, self.tools))
 
-    def _call(self, operation):
+    def _call(self, operation, unexpected="authority_unavailable"):
         try:
             return operation()
         except self.release.refusal_type as error:
             raise from_protocol("protocol_refused", error) from None
+        except UNEXPECTED:
+            # The library did not emit a code, so none passes through (study section 11).
+            raise RecordRefusal(unexpected) from None
 
     def _bounded(self, envelope):
         if type(envelope) is not bytes or not 0 < len(envelope) <= self.library.signatures.MAX_ENVELOPE_BYTES:
@@ -116,7 +123,8 @@ class AuthorityRecords:
 
     def native_parent(self, result, producer, validation):
         """Project caller-owned native evidence; absent evidence refuses by the library's code."""
-        return self._call(lambda: self.library.parents.native_projection(result, producer, validation))
+        return self._call(lambda: self.library.parents.native_projection(result, producer, validation),
+                          "validation_failed")
 
     def check_parent(self, link, registration, native, decisions, acceptance, registration_id):
         return self._call(lambda: self.library.parents.check_parent(
@@ -124,7 +132,7 @@ class AuthorityRecords:
 
     def check_custody(self, state, entries):
         """Refuse history classes the pinned native profile cannot restore or relocate."""
-        return self._call(lambda: self.library.native_records.custody(state, entries))
+        return self._call(lambda: self.library.native_records.custody(state, entries), "validation_failed")
 
     def acceptance_id(self, payload):
         return self._call(lambda: self.library.records.acceptance_id(payload))
