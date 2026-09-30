@@ -21,12 +21,18 @@ enters this tree. Ever.
 
 ## Current state
 
-Only the scaffold exists, and admission is closed. The service answers
-`GET /health/live` with 200 and `GET /health/ready` with 503 and the code
-`intake-closed`. Every production start refuses: a test trust root, a missing
-protocol pin and unavailable isolation each have a fixed startup code, and the
-scaffold adds `scaffold-only`. The [configuration contract](config/README.md)
-lists the fields and codes.
+The scaffold and the pinned protocol exist, and admission is closed. The
+service answers `GET /health/live` with 200 and `GET /health/ready` with 503 and
+the code `intake-closed`. Every production start refuses: a test trust root, a
+missing or refused protocol pin and unavailable isolation each have a fixed
+startup code, and the scaffold adds `scaffold-only`. The
+[configuration contract](config/README.md) lists the fields and codes.
+
+[`protocol.lock.json`](protocol.lock.json) pins the released authority
+protocol, and [`protocol.trees.json`](protocol.trees.json) lists the bytes of
+the two read-only Skills trees each image carries. The
+[protocol decision](docs/decisions/drafts/pin-authority-protocol.md) explains
+how they are built and checked.
 
 ## Start locally
 
@@ -47,10 +53,15 @@ network:
 
 ```sh
 scripts/linux-env.sh start
-scripts/linux-env.sh build
+SKILLS_REPO=<skills clone> scripts/linux-env.sh build
 scripts/linux-env.sh run python3 scripts/check.py --group scaffold
+scripts/linux-env.sh run python3 scripts/check.py --group protocol,domain
 scripts/linux-env.sh facts
 ```
+
+The build exports both protocol trees from a local clone of
+`wildcat-finance/skills` holding the two locked commits, and refuses unless
+every file matches its recorded digest.
 
 On a Linux host with uv 0.12.13, the wrapper runs the same check from the
 locked environment:

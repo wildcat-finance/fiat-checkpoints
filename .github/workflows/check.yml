@@ -13,6 +13,15 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: wildcat-finance/skills
+          ref: 685158cdc5407ca5559bf9ef4a021d664e764ece
+          fetch-depth: 0
+          path: .skills-source
+          persist-credentials: false
+      - name: Export the pinned protocol trees
+        run: python3 scripts/protocol_trees.py export --skills-repo .skills-source --out .protocol-trees
       - name: Build the pinned test image
         run: docker build --platform linux/amd64 -f containers/test.Dockerfile -t fiat-checkpoints-test:ci .
       - name: Check the scaffold in the test image
@@ -21,3 +30,9 @@ jobs:
           --user "$(id -u):$(id -g)" --env HOME=/tmp
           --volume "$PWD:$PWD" --workdir "$PWD" fiat-checkpoints-test:ci
           python3 scripts/check.py --group scaffold
+      - name: Check the protocol and domain rules in the test image
+        run: >-
+          docker run --rm --platform linux/amd64 --network none
+          --user "$(id -u):$(id -g)" --env HOME=/tmp
+          --volume "$PWD:$PWD" --workdir "$PWD" fiat-checkpoints-test:ci
+          python3 scripts/check.py --group protocol,domain

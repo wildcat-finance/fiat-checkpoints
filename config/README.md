@@ -19,16 +19,17 @@ parent directory remains outside the final-component symlink check.
 | `service_id`, `environment_id` | Lowercase names of at most 64 characters; local environments end in `-local` |
 | `host`, `port` | Explicit bind address and port; no hostname lookup |
 | `trust_profile` | A declaration of `local-test` or `production`; it loads no key |
-| `protocol_lock` | Null or the future filename `protocol.lock.json`; no protocol parser exists |
+| `protocol_lock` | Null or `protocol.lock.json`; production runs the released `lock` check on it |
 | `sandbox_profile` | `unavailable` or `gvisor`; neither establishes isolation |
 | `request_max_bytes`, `carrier_max_bytes` | Positive limits capped at 65,536 and 1,073,741,824 bytes; intake is absent |
 | `validation_concurrency` | A local declaration from 1 through 4; no worker is launched |
 
-Production returns fixed startup codes for test trust, a missing protocol pin
-and unavailable isolation, plus `scaffold-only`. Placing a file at the future
-pin path cannot enable production. Health reveals neither configuration nor
-private inventory. The production configuration fields in specification
-section 18 remain prerequisites for later implementation.
+Production returns fixed startup codes for test trust, a missing or refused
+protocol pin and unavailable isolation, plus `scaffold-only`. A lock or tree
+that fails its check adds its own `protocol-*` code. Even a passing lock cannot
+enable production while isolation is unavailable. Health reveals neither
+configuration nor private inventory. The production configuration fields in
+specification section 18 remain prerequisites for later implementation.
 
 Three questions govern local events: did the process start, is admission
 available, and how long did a health request take? `local-health-starting`,

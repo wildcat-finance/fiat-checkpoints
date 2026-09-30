@@ -10,6 +10,10 @@
 !pyproject.toml
 !uv.lock
 !.python-version
+!protocol.lock.json
+!protocol.trees.json
+!.protocol-trees/
+!.protocol-trees/**
 !containers/
 !containers/api.Dockerfile
 !containers/test.Dockerfile

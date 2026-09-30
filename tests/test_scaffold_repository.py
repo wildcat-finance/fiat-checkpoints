@@ -156,12 +156,17 @@ class PinsTests(unittest.TestCase):
         self.assertTrue(uses)
         for action in uses:
             self.assertRegex(action, r"^[a-z0-9/-]+@[0-9a-f]{40}$")
-        checkout = [step for step in steps if "uses" in step][0]
-        self.assertEqual(checkout["with"]["persist-credentials"], False)
+        for checkout in [step for step in steps if "uses" in step]:
+            self.assertEqual(checkout["with"]["persist-credentials"], False)
+        skills = [step["with"] for step in steps if step.get("with", {}).get("repository") == "wildcat-finance/skills"]
+        self.assertEqual(len(skills), 1)
+        self.assertRegex(skills[0]["ref"], r"^[0-9a-f]{40}$")
         commands = " ".join(step["run"] for step in steps if "run" in step)
         self.assertIn("-f containers/test.Dockerfile", commands)
         self.assertIn("--network none", commands)
+        self.assertIn("scripts/protocol_trees.py export", commands)
         self.assertIn("python3 scripts/check.py --group scaffold", commands)
+        self.assertIn("python3 scripts/check.py --group protocol,domain", commands)
 
 
 class LockToolTests(unittest.TestCase):
@@ -240,11 +245,11 @@ class ProvenanceTests(unittest.TestCase):
         licence = (ROOT / "LICENSE").read_text()
         self.assertIn("Apache License", licence)
         self.assertIn("Version 2.0, January 2004", licence)
-        self.assertFalse((ROOT / "protocol.lock.json").exists())
+        # Step 2 ships the released lock and tree manifest; no protocol schema is copied in.
         self.assertFalse((ROOT / "schemas").exists())
         self.assertEqual([p.name for p in (ROOT / "migrations").iterdir()], [".gitkeep"])
         package = ROOT / "src/fiat_checkpoints"
-        for name in ("auth", "domain", "grants", "persistence", "records", "validation"):
+        for name in ("auth", "grants", "persistence", "validation"):
             with self.subTest(module=name):
                 self.assertEqual([p.name for p in (package / name).iterdir() if p.name != "__pycache__"],
                                  ["__init__.py"])
