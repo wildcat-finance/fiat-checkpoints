@@ -340,8 +340,9 @@ class Projections:
 
         The stored prefix is verified first and the new envelope is verified at
         its end; only then is it written, and only if the head has not moved.
-        A refused record writes nothing. Privileged callers only: the route
-        that reaches this belongs to the operator deployment (Skills #863).
+        A refused record writes nothing. Privileged callers only: its route,
+        `POST /internal/v1/authority-records`, goes to a new fiat-checkpoints
+        issue filed at integration, and Skills #863 keeps its live proof.
         """
         now = require_now(now)
         try:

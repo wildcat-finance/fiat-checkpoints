@@ -38,7 +38,9 @@ PKCE uses `S256`; its verifier is derived from the login state and browser
 binding, so nothing extra is stored.
 
 No live adapter ships. `create_intake_app` refuses production with the same
-startup codes as the health app, including `scaffold-only`. A live adapter
+startup codes as the health app, including `scaffold-only`. The GitHub App
+login adapter goes to a new fiat-checkpoints issue filed at integration;
+Skills #863 keeps its live proof. A live adapter
 names its client secret as `secret:<name>` and reads the value at exchange
 time from `/run/secrets/fiat-checkpoints/<name>`: one link, a regular file, at
 most 4,096 bytes, never logged or repeated in an error.
@@ -72,9 +74,10 @@ released `TrustPrefix`, and a stored row that fails refuses as
 verified prefix and writes it only if the head has not moved, holding the run
 row. Announce needs `announce`, the endorsement's own grant `upload`, status
 `read_status`, each checked by the released `grant_at` at the service clock.
-A key revocation or an expired grant takes effect at the next request. The
-ingestion method has no HTTP route: the privileged listener belongs to the
-operator deployment (Skills #863).
+A key revocation or an expired grant takes effect at the next request. A run
+whose stored records no longer verify freezes that run only. The ingestion
+method has no HTTP route yet: `POST /internal/v1/authority-records` goes to
+the same new fiat-checkpoints issue, and Skills #863 keeps its live proof.
 
 ### Proof of possession
 
@@ -85,7 +88,9 @@ signature check and records it for the operator. Recording grants nothing. The
 operator's key enrollment embeds the proof, and `TrustPrefix` verifies it
 again. A key that signs its own enrollment or challenge refuses as
 `issuer-untrusted`, and an endorsement from an unenrolled key refuses as
-`signer_not_enrolled`.
+`signer_not_enrolled`. The API role pins OpenSSL alone, so it verifies
+`spki-p256` keys only; Step 6 pins ssh-keygen and gpg in the validator role
+(Laurence, 2026-09-30).
 
 ### Exact-upload endorsement
 
