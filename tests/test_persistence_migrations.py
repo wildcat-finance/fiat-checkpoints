@@ -8,11 +8,12 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest import mock
 
 from fiat_checkpoints.domain.transitions import TRANSITIONS, Evidence
 from fiat_checkpoints.persistence.database import Database, PersistenceRefusal
 from fiat_checkpoints.persistence.migrations import DEFAULT_DIRECTORY, load_migrations, migrate
-from fiat_checkpoints.persistence.scratch import ScratchDatabase
+from fiat_checkpoints.persistence.scratch import ENVIRONMENT, ScratchDatabase, socket_directory
 from tests.persistence_support import T0, DatabaseCase, passed, run_threads
 
 
@@ -234,6 +235,20 @@ class DatabaseBoundaryTests(unittest.TestCase):
                 with self.assertRaises(PersistenceRefusal) as caught:
                     Database(*arguments)
                 self.assertEqual(caught.exception.code, "database_config_invalid")
+
+    def test_a_closed_environment_still_finds_the_test_server_socket(self):
+        # The Elenchus runner starts checks without FIAT_TEST_POSTGRES.
+        with mock.patch.dict(os.environ):
+            os.environ.pop(ENVIRONMENT, None)
+            try:
+                found = socket_directory()
+            except PersistenceRefusal as error:
+                found = error.code
+        self.assertEqual(found, "/run/fiat-postgres")
+        with mock.patch.dict(os.environ, {ENVIRONMENT: "relative/socket"}):
+            with self.assertRaises(PersistenceRefusal) as caught:
+                socket_directory()
+        self.assertEqual(caught.exception.code, "database_unavailable")
 
     def test_unreachable_server_is_a_fixed_code_with_no_library_text(self):
         with tempfile.TemporaryDirectory() as temporary:

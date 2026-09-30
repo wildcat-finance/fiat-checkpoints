@@ -1,8 +1,9 @@
 """Shared set-up for checks that need the pinned PostgreSQL 16 test server.
 
 Each test gets its own freshly migrated scratch database, dropped afterwards.
-Without `FIAT_TEST_POSTGRES` the set-up raises, so the test errors rather than
-skipping: a persistence group cannot pass without a real server.
+Without a server at `FIAT_TEST_POSTGRES`, or at `/run/fiat-postgres` when that
+is unset, the set-up raises, so the test errors rather than skipping: a
+persistence group cannot pass without a real server.
 """
 
 from contextlib import contextmanager

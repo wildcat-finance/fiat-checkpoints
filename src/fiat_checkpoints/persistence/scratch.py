@@ -1,7 +1,8 @@
 """Disposable databases for checks against the pinned local PostgreSQL 16.
 
-Checks reach the server only through the Unix socket directory named by
-`FIAT_TEST_POSTGRES`; `scripts/test-postgres.sh` starts that server with no
+Checks reach the server only through a Unix socket directory: the one named by
+`FIAT_TEST_POSTGRES`, or `/run/fiat-postgres` where the test container and CI
+mount the socket volume. `scripts/test-postgres.sh` starts that server with no
 network. Each scratch database has a random name and is dropped on close.
 """
 
@@ -14,12 +15,16 @@ from fiat_checkpoints.persistence.database import Database, PersistenceRefusal
 
 
 ENVIRONMENT = "FIAT_TEST_POSTGRES"
+# The Elenchus runner starts checks with a closed environment that drops
+# FIAT_TEST_POSTGRES, so the mount point is also the default. With no server
+# there, connecting fails and the check errors rather than skipping.
+DEFAULT_SOCKET_DIRECTORY = "/run/fiat-postgres"
 SERVER_MAJOR = 16
 
 
 def socket_directory():
-    value = os.environ.get(ENVIRONMENT)
-    if not value or not os.path.isabs(value):
+    value = os.environ.get(ENVIRONMENT) or DEFAULT_SOCKET_DIRECTORY
+    if not os.path.isabs(value):
         raise PersistenceRefusal("database_unavailable")
     return value
 
