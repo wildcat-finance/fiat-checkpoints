@@ -21,18 +21,25 @@ enters this tree. Ever.
 
 ## Current state
 
-The scaffold and the pinned protocol exist, and admission is closed. The
-service answers `GET /health/live` with 200 and `GET /health/ready` with 503 and
-the code `intake-closed`. Every production start refuses: a test trust root, a
-missing or refused protocol pin and unavailable isolation each have a fixed
-startup code, and the scaffold adds `scaffold-only`. The
-[configuration contract](config/README.md) lists the fields and codes.
+The scaffold, the pinned protocol and PostgreSQL coordination exist, and
+admission is closed. The service answers `GET /health/live` with 200 and
+`GET /health/ready` with 503 and the code `intake-closed`. Every production
+start refuses: a test trust root, a missing or refused protocol pin and
+unavailable isolation each have a fixed startup code, and the scaffold adds
+`scaffold-only`. The [configuration contract](config/README.md) lists the
+fields and codes.
 
 [`protocol.lock.json`](protocol.lock.json) pins the released authority
 protocol, and [`protocol.trees.json`](protocol.trees.json) lists the bytes of
 the two read-only Skills trees each image carries. The
 [protocol decision](docs/decisions/drafts/pin-authority-protocol.md) explains
 how they are built and checked.
+
+[`migrations/`](migrations) and `src/fiat_checkpoints/persistence/` coordinate
+candidates, quota reservations, fenced leases, immutable publication intents
+and the outbox in PostgreSQL 16. Nothing there can mark a checkpoint accepted.
+The [coordination decision](docs/decisions/drafts/coordinate-intake-with-fenced-leases.md)
+records the table layout, idempotency scope and lease rules.
 
 ## Start locally
 
@@ -56,8 +63,14 @@ scripts/linux-env.sh start
 SKILLS_REPO=<skills clone> scripts/linux-env.sh build
 scripts/linux-env.sh run python3 scripts/check.py --group scaffold
 scripts/linux-env.sh run python3 scripts/check.py --group protocol,domain
+scripts/linux-env.sh db-start
+scripts/linux-env.sh run python3 scripts/check.py --group persistence,concurrency
 scripts/linux-env.sh facts
 ```
+
+`db-start` runs the digest-pinned PostgreSQL 16 test server with no network.
+The test container reaches it only through a Unix socket volume, and each test
+creates and drops its own database. `db-stop` removes the server.
 
 The build exports both protocol trees from a local clone of
 `wildcat-finance/skills` holding the two locked commits, and refuses unless

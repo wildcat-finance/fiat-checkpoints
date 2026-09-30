@@ -70,3 +70,18 @@ def protocol_lock_shipped(context):
 
 
 RESOLVERS["protocol-lock-shipped"] = protocol_lock_shipped
+
+
+def restart_recovery(context):
+    """Migration, restart and stale-fence checks produce no unauthorized intent.
+
+    The value is true only when the restart scenario's every observation holds
+    against the pinned PostgreSQL 16 server and the persistence and
+    concurrency groups pass in this process.
+    """
+    from fiat_checkpoints.persistence.restart import holds
+
+    return holds() and context.run_groups(("persistence", "concurrency"))
+
+
+RESOLVERS["restart-recovery"] = restart_recovery

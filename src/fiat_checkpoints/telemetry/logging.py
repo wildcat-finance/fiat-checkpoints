@@ -4,11 +4,18 @@ import json
 import logging
 
 
+# Candidate, attempt and job identifiers are random service ids for private
+# correlation. Actor ids, digests, tokens and bodies are never fields.
+FIELDS = (
+    "event", "request_id", "route", "status", "codes", "duration_us",
+    "candidate", "attempt", "job", "kind", "fence", "from_state", "to_state",
+    "code", "scope", "age_ms", "delay_ms", "count",
+)
+
+
 class EventFormatter(logging.Formatter):
     def format(self, record):
-        event = {key: getattr(record, key) for key in (
-            "event", "request_id", "route", "status", "codes", "duration_us"
-        ) if hasattr(record, key)}
+        event = {key: getattr(record, key) for key in FIELDS if hasattr(record, key)}
         return json.dumps(event, sort_keys=True, separators=(",", ":"))
 
 

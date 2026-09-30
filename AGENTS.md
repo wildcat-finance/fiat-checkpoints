@@ -11,14 +11,16 @@ appended. Controller records under `.hexaemeron/` stay local and untracked.
 
 ## Current boundary
 
-The scaffold and the pinned protocol are implemented. Production startup and
+The scaffold, the pinned protocol and PostgreSQL coordination are implemented;
+SQL coordinates work and never records acceptance. Production startup and
 readiness stay closed. `protocol.lock.json` and `protocol.trees.json` change
 only with a new protocol release; regenerate the manifest with
 `scripts/protocol_trees.py manifest`. Call the released library for records,
 signatures and trust instead of reimplementing it. Never invent a protocol
 schema, an accepted checkpoint or isolation evidence. Keep API, upload gateway,
 staging broker and credential-free validator as separate roles. Empty module
-and migration locations reserve places; they establish no behaviour.
+locations reserve places; they establish no behaviour. A new table or column
+arrives in a new numbered migration; never edit an applied one.
 
 ## Checks
 
@@ -28,7 +30,9 @@ Linux test image, never on a macOS host:
 group is a new `tests/test_<group>*.py` module; `scripts/check.py` itself is
 pinned by the runbook. A test class that starts a child process sets
 `spawns_child_process = True`. Missing groups, zero tests and skips refuse
-success. Keep a failure's evidence and find its cause before changing code.
+success. The `persistence` and `concurrency` groups need
+`scripts/linux-env.sh db-start` first. Keep a failure's evidence and find its
+cause before changing code.
 
 ## Records and data
 

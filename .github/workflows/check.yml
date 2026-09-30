@@ -36,3 +36,16 @@ jobs:
           --user "$(id -u):$(id -g)" --env HOME=/tmp
           --volume "$PWD:$PWD" --workdir "$PWD" fiat-checkpoints-test:ci
           python3 scripts/check.py --group protocol,domain
+      - name: Start the pinned PostgreSQL 16 test server
+        run: scripts/test-postgres.sh start
+      - name: Check persistence and concurrency in the test image
+        run: >-
+          docker run --rm --platform linux/amd64 --network none
+          --user "$(id -u):$(id -g)" --env HOME=/tmp
+          --env FIAT_TEST_POSTGRES=/run/fiat-postgres
+          --volume fiat-checkpoints-postgres-socket:/run/fiat-postgres
+          --volume "$PWD:$PWD" --workdir "$PWD" fiat-checkpoints-test:ci
+          python3 scripts/check.py --group persistence,concurrency
+      - name: Stop the PostgreSQL test server
+        if: always()
+        run: scripts/test-postgres.sh stop
