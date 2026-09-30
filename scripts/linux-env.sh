@@ -4,10 +4,13 @@
 #   scripts/linux-env.sh start          create or start the colima profile
 #   scripts/linux-env.sh build          build the pinned test image (needs SKILLS_REPO)
 #   scripts/linux-env.sh facts          print kernel, architecture and image id
+#   scripts/linux-env.sh db-start       start the pinned PostgreSQL 16 test server
+#   scripts/linux-env.sh db-stop        remove that server and its socket volume
 #   scripts/linux-env.sh run CMD...     run CMD in the image at this checkout
 #
 # The profile mounts this checkout writable and the Git directory read-only at
 # their host paths. The container has no network and runs as the calling user.
+# It mounts the test server's socket volume, the only way it reaches PostgreSQL.
 set -eu
 
 PROFILE=fiat-s862a
@@ -15,6 +18,7 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
 GIT_COMMON=$(git -C "$ROOT" rev-parse --path-format=absolute --git-common-dir)
 CONTEXT=colima-$PROFILE
 IMAGE=fiat-checkpoints-test:local
+POSTGRES_VOLUME=fiat-checkpoints-postgres-socket
 
 refuse() {
   printf 'linux-env-refused: %s\n' "$1" >&2
@@ -48,11 +52,15 @@ case "${1:-}" in
       python3 -c 'import os, platform; u = os.uname(); print("kernel=" + u.release); print("machine=" + u.machine); print("python=" + platform.python_version())'
     printf 'image=%s\n' "$(docker_env image inspect --format '{{.Id}}' "$IMAGE")"
     ;;
+  db-start|db-stop)
+    DOCKER_CONTEXT=$CONTEXT exec "$ROOT/scripts/test-postgres.sh" "${1#db-}"
+    ;;
   run)
     shift
     [ "$#" -gt 0 ] || refuse command-missing
     exec docker --context "$CONTEXT" run --rm --platform linux/amd64 --network none \
       --user "$(id -u):$(id -g)" --env HOME=/tmp \
+      --env FIAT_TEST_POSTGRES=/run/fiat-postgres --volume "$POSTGRES_VOLUME:/run/fiat-postgres" \
       --volume "$ROOT:$ROOT" --volume "$GIT_COMMON:$GIT_COMMON:ro" \
       --workdir "$ROOT" "$IMAGE" "$@"
     ;;

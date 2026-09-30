@@ -34,6 +34,12 @@ the two read-only Skills trees each image carries. The
 [protocol decision](docs/decisions/drafts/pin-authority-protocol.md) explains
 how they are built and checked.
 
+[`migrations/`](migrations) and `src/fiat_checkpoints/persistence/` coordinate
+candidates, quota reservations, fenced leases, immutable publication intents
+and the outbox in PostgreSQL 16. Nothing there can mark a checkpoint accepted.
+The [coordination decision](docs/decisions/drafts/coordinate-intake-with-fenced-leases.md)
+records the table layout, idempotency scope and lease rules.
+
 ## Start locally
 
 Python 3.14.6 with the locked dependencies installed:
@@ -56,8 +62,14 @@ scripts/linux-env.sh start
 SKILLS_REPO=<skills clone> scripts/linux-env.sh build
 scripts/linux-env.sh run python3 scripts/check.py --group scaffold
 scripts/linux-env.sh run python3 scripts/check.py --group protocol,domain
+scripts/linux-env.sh db-start
+scripts/linux-env.sh run python3 scripts/check.py --group persistence,concurrency
 scripts/linux-env.sh facts
 ```
+
+`db-start` runs the digest-pinned PostgreSQL 16 test server with no network.
+The test container reaches it only through a Unix socket volume, and each test
+creates and drops its own database. `db-stop` removes the server.
 
 The build exports both protocol trees from a local clone of
 `wildcat-finance/skills` holding the two locked commits, and refuses unless

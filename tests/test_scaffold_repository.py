@@ -167,6 +167,22 @@ class PinsTests(unittest.TestCase):
         self.assertIn("scripts/protocol_trees.py export", commands)
         self.assertIn("python3 scripts/check.py --group scaffold", commands)
         self.assertIn("python3 scripts/check.py --group protocol,domain", commands)
+        self.assertIn("python3 scripts/check.py --group persistence,concurrency", commands)
+        self.assertIn("scripts/test-postgres.sh start", commands)
+        self.assertIn("--volume fiat-checkpoints-postgres-socket:/run/fiat-postgres", commands)
+        self.assertIn("--env FIAT_TEST_POSTGRES=/run/fiat-postgres", commands)
+
+    def test_postgresql_test_server_is_pinned_by_digest_and_has_no_network(self):
+        script = (ROOT / "scripts/test-postgres.sh").read_text()
+        self.assertEqual(re.findall(r"^IMAGE=.*$", script, re.M), [
+            "IMAGE=postgres:16.15-trixie@sha256:"
+            "1a6ab3f5345eb6dbe04a1349529caabdb0ab09293a09590fad07b2246bfa4b54"])
+        self.assertIn("--network none", script)
+        self.assertIn("listen_addresses= ", script)
+        self.assertIn("--auth-host=reject", script)
+        environment = (ROOT / "scripts/linux-env.sh").read_text()
+        self.assertIn('"$ROOT/scripts/test-postgres.sh"', environment)
+        self.assertIn("--env FIAT_TEST_POSTGRES=/run/fiat-postgres", environment)
 
 
 class LockToolTests(unittest.TestCase):
@@ -247,9 +263,11 @@ class ProvenanceTests(unittest.TestCase):
         self.assertIn("Version 2.0, January 2004", licence)
         # Step 2 ships the released lock and tree manifest; no protocol schema is copied in.
         self.assertFalse((ROOT / "schemas").exists())
-        self.assertEqual([p.name for p in (ROOT / "migrations").iterdir()], [".gitkeep"])
+        # Step 3 ships numbered SQL migrations and nothing else there.
+        for path in (ROOT / "migrations").iterdir():
+            self.assertRegex(path.name, r"^\d{4}_[a-z0-9_]+\.sql$")
         package = ROOT / "src/fiat_checkpoints"
-        for name in ("auth", "grants", "persistence", "validation"):
+        for name in ("auth", "grants", "validation"):
             with self.subTest(module=name):
                 self.assertEqual([p.name for p in (package / name).iterdir() if p.name != "__pycache__"],
                                  ["__init__.py"])

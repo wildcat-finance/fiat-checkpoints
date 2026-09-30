@@ -259,7 +259,7 @@ class DesignModeTests(SyntheticRoot):
             ("isolated-pinned-runtime", "unknown-criterion", "design-criterion-unknown"),
             ("isolated-pinned-runtime", "validator-isolated", "design-criterion-selection-only"),
             ("in-process-validation", "protocol-lock-shipped", "design-candidate-not-selected"),
-            ("isolated-pinned-runtime", "restart-recovery", "design-criterion-unavailable"),
+            ("isolated-pinned-runtime", "native-sequence-linux", "design-criterion-unavailable"),
         ):
             with self.subTest(code=code):
                 run = self.design(candidate, criterion)
@@ -332,6 +332,7 @@ class WrapperTests(unittest.TestCase):
 
     def test_public_scripts_are_tracked_executable(self):
         modes = dict(tracked_entries(ROOT))
-        for name in ("scripts/check.py", "scripts/check.sh", "scripts/serve.py", "scripts/linux-env.sh"):
+        for name in ("scripts/check.py", "scripts/check.sh", "scripts/serve.py", "scripts/linux-env.sh",
+                     "scripts/test-postgres.sh"):
             with self.subTest(script=name):
                 self.assertEqual(modes.get(name), 0o100755)
