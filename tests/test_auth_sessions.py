@@ -1,8 +1,12 @@
 """Login state, numeric identity, sessions, access tokens and CSRF against the test server."""
 
 from datetime import timedelta
+import threading
+import time
 import unittest
 from unittest import mock
+
+from psycopg import errors
 
 from fiat_checkpoints.auth import sessions as sessions_module
 from fiat_checkpoints.auth.refusals import AuthRefusal
@@ -244,6 +248,39 @@ class SessionLifetimeTests(SessionCase):
         self.assertEqual(self.sessions.session(kept.secret, at(60)).actor_id, 41)
         self.assertEqual(self.sessions.sweep(at(900)), 2)
         self.assertEqual(self.scalar("SELECT count(*) FROM sessions"), 1)
+
+    def test_a_sweep_never_holds_a_token_while_it_waits_for_that_tokens_session(self):
+        # Logout and renewal lock the session, then its tokens. A sweep that
+        # took the token first closed a cycle, and PostgreSQL aborted one side.
+        opened = self.sessions.open_session(41, T0)
+        self.sessions.issue_token(opened.actor, T0)
+        holder, probe = self.database.connect(), self.database.connect()
+        result = {}
+        try:
+            holder.execute("BEGIN")
+            holder.execute("SELECT 1 FROM sessions WHERE session_id = %s FOR UPDATE", (opened.actor.session_id,))
+            sweeper = threading.Thread(target=lambda: result.setdefault(
+                "removed", self.sessions.sweep(T0 + timedelta(hours=8, seconds=1))))
+            sweeper.start()
+            deadline = time.monotonic() + 30
+            while sweeper.is_alive() and time.monotonic() < deadline and not probe.execute(
+                    "SELECT count(*) AS n FROM pg_stat_activity WHERE datname = %s AND wait_event_type = 'Lock'",
+                    (self.database.dbname,)).fetchone()["n"]:
+                time.sleep(0.02)
+            unlocked = probe.execute("SELECT token_sha256 FROM access_tokens FOR UPDATE SKIP LOCKED").fetchall()
+            try:
+                holder.execute("UPDATE access_tokens SET revoked_at = %s WHERE session_id = %s "
+                               "AND revoked_at IS NULL", (T0, opened.actor.session_id))
+                holder.execute("COMMIT")
+            except errors.DeadlockDetected:
+                holder.execute("ROLLBACK")
+            sweeper.join(30)
+        finally:
+            holder.close()
+            probe.close()
+        self.assertEqual(len(unlocked), 1)
+        self.assertEqual(result.get("removed"), 2)
+        self.assertEqual(self.scalar("SELECT count(*) FROM sessions"), 0)
 
     def test_session_events_are_counts_without_ids_or_secrets(self):
         with recorded_events() as events:

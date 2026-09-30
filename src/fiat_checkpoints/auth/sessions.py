@@ -294,21 +294,28 @@ class SessionStore:
         _event("session-revoked")
 
     def sweep(self, now, limit=SWEEP_BATCH):
-        """Delete expired login state and expired or revoked tokens and sessions."""
+        """Delete expired login state and expired or revoked tokens and sessions.
+
+        The sessions are locked before any token, in the order `open_session`
+        takes them, so a sweep never holds a token while it waits for that
+        token's session: logout and renewal lock the session first.
+        """
         now = require_now(now)
         positive_int(limit, 10_000)
+        values = {"now": now, "limit": limit}
 
         def work(connection):
-            removed = 0
-            for statement in (
+            removed = connection.execute(
                 "DELETE FROM login_states WHERE ctid IN (SELECT ctid FROM login_states "
-                "WHERE expires_at <= %(now)s LIMIT %(limit)s)",
-                "DELETE FROM access_tokens WHERE ctid IN (SELECT ctid FROM access_tokens "
-                "WHERE expires_at <= %(now)s OR revoked_at IS NOT NULL LIMIT %(limit)s)",
-                "DELETE FROM sessions WHERE ctid IN (SELECT ctid FROM sessions "
-                "WHERE expires_at <= %(now)s OR revoked_at IS NOT NULL LIMIT %(limit)s)",
-            ):
-                removed += connection.execute(statement, {"now": now, "limit": limit}).rowcount
+                "WHERE expires_at <= %(now)s LIMIT %(limit)s)", values).rowcount
+            ended = [row["session_id"] for row in connection.execute(
+                "SELECT session_id FROM sessions WHERE expires_at <= %(now)s OR revoked_at IS NOT NULL "
+                "ORDER BY actor_id, created_at, session_id LIMIT %(limit)s FOR UPDATE", values).fetchall()]
+            removed += connection.execute(
+                "DELETE FROM access_tokens WHERE token_sha256 IN (SELECT token_sha256 FROM access_tokens "
+                "WHERE expires_at <= %(now)s OR revoked_at IS NOT NULL "
+                "ORDER BY session_id, created_at, token_sha256 LIMIT %(limit)s FOR UPDATE)", values).rowcount
+            removed += connection.execute("DELETE FROM sessions WHERE session_id = ANY(%s)", (ended,)).rowcount
             return removed
 
         return self._run(work)
