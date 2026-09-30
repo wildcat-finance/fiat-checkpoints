@@ -243,12 +243,13 @@ class Coordinator:
         """Abandon upload attempts whose lease has expired and release their streams.
 
         A stream counts against the concurrency ceilings only while its lease
-        lives. Otherwise an upload that stopped without sealing kept its slot
-        until the same candidate began again or reached its 24-hour deadline,
-        and abandoned uploads refused every other stream. A candidate another
-        call holds is skipped rather than waited on, so the candidate-first
-        lock order holds; its attempt is still open after the lock only if
-        nothing sealed or replaced it meanwhile.
+        lives. Without this, an upload that stopped without sealing would keep
+        its slot until the same candidate began again or reached its 24-hour
+        deadline, and abandoned uploads would refuse every other stream. A
+        candidate another call holds is skipped rather than waited on, so the
+        candidate-first lock order holds. Once the lock is held, the
+        candidate's attempt is still open only if nothing sealed or replaced
+        it meanwhile.
         """
         expired = connection.execute(
             "SELECT candidate_id FROM upload_attempts WHERE state = 'open' AND lease_expires_at <= %s "
