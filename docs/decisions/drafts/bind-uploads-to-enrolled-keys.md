@@ -95,22 +95,34 @@ again. A key that signs its own enrollment or challenge refuses as
 ### Exact-upload endorsement
 
 Announce binds a 64-hex nonce and the snapshot, manifest and parent digests
-beside the candidate. The library authenticates the endorsement with the
-enrolled key and checks enrollment and grant at its `issued_at`. The service
-then compares actor, candidate, nonce, run, the three identities by role,
-length and parent. It requires `issued_at` from announce's second up to now,
-an unexpired endorsement and the named grant current now. The endorsement is
-recorded once, only while the trust head is unchanged. An exact replay of the
-recorded envelope returns the recorded result; any other envelope for that
-candidate refuses.
+beside the candidate as its first challenge. The library authenticates the
+endorsement with the enrolled key and checks enrollment and grant at its
+`issued_at`. The service then compares actor, candidate, the nonce of the
+challenge it names, run, the three identities by role, length and parent. It
+requires `issued_at` from that challenge's second up to now, an unexpired
+endorsement and the named grant current now. The endorsement is recorded once
+per challenge, only while the trust head is unchanged.
+
+A candidate can be endorsed again before signer authorization. Once an
+endorsement has spent the candidate's challenge, a replayed announce issues
+the next challenge with a fresh nonce, while the candidate is unexpired and
+before signer authorization, up to 288 challenges: one 300-second
+endorsement after another across the 24-hour candidate lifetime. The latest
+recorded endorsement is the bound one while it is unexpired;
+`EndorsementStore.bound` refuses it once expired, or once it would expire
+before the instant its caller needs, and an earlier endorsement is never
+bound again. An exact replay of the bound envelope returns the
+recorded result. Another envelope for a spent challenge, an endorsement over
+an earlier challenge and a replay of an earlier endorsement refuse.
 
 | Refusal | Code |
 | --- | --- |
 | Actor, identity or length differs | 422 `identity_mismatch` |
-| Candidate, nonce, run, parent, time or signature differs; grant not current | 422 `endorsement_invalid` |
+| Candidate, nonce, run, parent, time or signature differs; grant not current; challenge spent or earlier; endorsement earlier or expired | 422 `endorsement_invalid` |
 | Signing key has no live enrollment for the actor | 422 `signer_not_enrolled` |
 | Another actor's candidate, or no current grant | 404 `not_found` |
 | Trust head moved before the commit, or database outage | 503 `policy_unavailable` |
+| The candidate's 288th challenge is spent | 429 `quota_exceeded` |
 
 A 422 carries the library's own `protocol_code` when the library produced it.
 Any unexpected failure is 503 `authority_unavailable` with no text.
@@ -158,15 +170,20 @@ ingesting a fifth record starts six. A run holds at most 256 trust records.
 - Verify the full prefix on every request. Rejected: one process start per
   record per request; the cache follows the head, whose tail digest commits to
   the whole prefix through each predecessor link.
-- Let a later endorsement replace the first. Rejected: the nonce would stop
-  being single-use and a replay would be ambiguous.
+- One endorsement per candidate. Rejected: the released replay requires an
+  acceptance issued inside its endorsement's validity, at most 300 seconds,
+  and one validation job may take 900. A fresh challenge for each endorsement
+  keeps every nonce single-use and every replay unambiguous.
+- A separate route that issues a new challenge. Rejected: section 13's
+  announce already returns the candidate's challenge, so a replayed announce
+  issues the next one without a new route or state.
 - A base64url nonce. Rejected after an observed failure: one nonce in about 32
   starts with `-` or `_`, which the released ID pattern refuses as
   `schema-pattern`.
 
 ## Consequences
 
-Step 5 can issue a capability from the recorded endorsement after checking the
+Step 5 can issue a capability from the bound endorsement after checking the
 grant again, and Step 6 takes historical signers from the same projection.
 Each head change costs one full prefix verification, bounded by 256 records.
 Announce checks its grant when the request starts, so a revocation just before
@@ -176,6 +193,8 @@ A stolen login state can burn a login but cannot open a session.
 explicit services.
 
 The released replay requires an acceptance to be issued inside its
-endorsement's validity, at most five minutes. This step records one
-endorsement per candidate, so issue #2 needs a way to endorse again before
-acceptance.
+endorsement's validity, at most five minutes. Issue #2 therefore signs only
+against `EndorsementStore.bound` with the acceptance time as its `until`,
+checked again under the candidate lock, and asks the contributor to endorse
+again when that endorsement has expired or would expire first. No decision intent in this packet carries an endorsement
+digest.

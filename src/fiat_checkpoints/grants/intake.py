@@ -86,7 +86,11 @@ class Intake:
         self.carrier_max_bytes = carrier_max_bytes
 
     def announce(self, actor_id, key, body, now):
-        """Announce one exact submission under a current `announce` grant and bind its challenge."""
+        """Announce one exact submission under a current `announce` grant and bind its challenge.
+
+        A replay of the same announce returns the candidate's current
+        challenge, and the next one once an endorsement has spent it.
+        """
         positive_int(actor_id)
         now = require_now(now)
         _object(body, ANNOUNCE_FIELDS)
@@ -123,7 +127,9 @@ class Intake:
         run = self.projections.run_for(binding.scope)
         projection = self.projections.current(run)
         verified = projection.authenticate(envelope)
-        terms = check_binding(verified.record, binding, actor_id, now)
+        record = verified.record
+        binding = self.endorsements.named(binding, record.get("nonce") if type(record) is dict else None)
+        terms = check_binding(record, binding, actor_id, now)
         projection.named_grant(terms.grant, actor_id, "upload", now)
         return self.endorsements.record(binding, verified, terms, (projection.count, projection.tail), now)
 

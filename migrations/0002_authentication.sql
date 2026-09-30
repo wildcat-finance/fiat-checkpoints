@@ -66,19 +66,28 @@ CREATE TABLE enrollment_proofs (
     PRIMARY KEY (run_key, challenge_sha256)
 );
 
--- What announce bound beside the candidate row: the other two identities, the
--- parent link and the nonce the endorsement must carry.
+-- What announce bound beside the candidate row, once per challenge: the other
+-- two identities, the parent link and the nonce the endorsement must carry. A
+-- candidate takes its next challenge only after an endorsement spent the last
+-- one, at most 288 in all: one 300-second endorsement after another across
+-- the 24-hour candidate lifetime.
 CREATE TABLE endorsement_challenges (
-    candidate_id uuid PRIMARY KEY REFERENCES candidates,
+    candidate_id uuid NOT NULL REFERENCES candidates,
+    sequence integer NOT NULL CHECK (sequence BETWEEN 1 AND 288),
     nonce text NOT NULL UNIQUE CHECK (nonce ~ '^[0-9a-f]{64}$'),
     snapshot_id text NOT NULL CHECK (snapshot_id ~ '^[0-9a-f]{64}$'),
     controller_manifest_sha256 text NOT NULL CHECK (controller_manifest_sha256 ~ '^[0-9a-f]{64}$'),
     parent_sha256 text NOT NULL CHECK (parent_sha256 ~ '^[0-9a-f]{64}$'),
-    issued_at timestamptz NOT NULL
+    issued_at timestamptz NOT NULL,
+    PRIMARY KEY (candidate_id, sequence)
 );
 
+-- One verified endorsement per challenge. The one with the highest sequence
+-- is the candidate's bound endorsement while it is unexpired; the earlier
+-- ones stay as history and are never bound again.
 CREATE TABLE upload_endorsements (
-    candidate_id uuid PRIMARY KEY REFERENCES endorsement_challenges,
+    candidate_id uuid NOT NULL,
+    sequence integer NOT NULL,
     envelope bytea NOT NULL CHECK (octet_length(envelope) BETWEEN 1 AND 65536),
     envelope_sha256 text NOT NULL UNIQUE CHECK (envelope_sha256 ~ '^[0-9a-f]{64}$'),
     policy_sha256 text NOT NULL CHECK (policy_sha256 ~ '^[0-9a-f]{64}$'),
@@ -90,7 +99,9 @@ CREATE TABLE upload_endorsements (
     issued_at timestamptz NOT NULL,
     expires_at timestamptz NOT NULL
         CHECK (expires_at > issued_at AND expires_at <= issued_at + interval '5 minutes'),
-    verified_at timestamptz NOT NULL CHECK (verified_at >= issued_at AND verified_at < expires_at)
+    verified_at timestamptz NOT NULL CHECK (verified_at >= issued_at AND verified_at < expires_at),
+    PRIMARY KEY (candidate_id, sequence),
+    FOREIGN KEY (candidate_id, sequence) REFERENCES endorsement_challenges
 );
 
 CREATE TRIGGER trust_records_immutable BEFORE UPDATE OR DELETE ON trust_records

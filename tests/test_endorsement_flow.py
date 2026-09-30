@@ -162,6 +162,38 @@ class EndorsementTests(FlowCase):
         self.clock.advance(1)
         self.assertEqual(self.endorse(second, self.signed(second, issued=121, lifetime=60)).status_code, 200)
 
+    def test_a_candidate_is_endorsed_again_under_a_fresh_challenge(self):
+        first = self.announce("announce-key-0001").json()
+        other = self.announce("announce-key-0002", identities=dict(IDENTITIES, outer_sha256="7" * 64)).json()
+        envelope = self.signed(first)
+        self.assertEqual(self.endorse(first, envelope).status_code, 200)
+        reserved = self.scalar("SELECT count(*) FROM reservations")
+        # The first endorsement expires at 120 s; a replayed announce then carries the next challenge.
+        self.clock.advance(130)
+        again = self.announce("announce-key-0001")
+        self.assertEqual((again.status_code, again.json()["candidate_id"]), (200, first["candidate_id"]))
+        renewed = again.json()
+        self.assertNotEqual(renewed["endorsement"]["nonce"], first["endorsement"]["nonce"])
+        self.assertEqual(renewed["endorsement"]["not_before"], stamp(130))
+        self.assertEqual(self.announce("announce-key-0001").json()["endorsement"], renewed["endorsement"])
+        fresh = self.signed(renewed, issued=130)
+        done = self.endorse(renewed, fresh)
+        self.assertEqual((done.status_code, done.json()["replayed"]), (200, False), done.text)
+        # Neither the earlier endorsement nor its challenge can be used again, and a fresh
+        # nonce belongs to its own candidate only.
+        self.assert_refused(self.endorse(first, envelope), 422, "endorsement_invalid")
+        self.assert_refused(self.endorse(first, self.signed(first, issued=131)), 422, "endorsement_invalid")
+        self.assert_refused(self.endorse(renewed, self.signed(renewed, issued=131, lifetime=90)), 422,
+                            "endorsement_invalid")
+        borrowed = self.signed(other, issued=131, nonce=renewed["endorsement"]["nonce"],
+                               identities=dict(IDENTITIES, outer_sha256="7" * 64))
+        self.assert_refused(self.endorse(other, borrowed), 422, "endorsement_invalid")
+        self.assertEqual(self.endorse(renewed, fresh).json()["replayed"], True)
+        self.assertEqual(self.recorded(), 2)
+        self.assertEqual(self.scalar("SELECT count(*) FROM reservations"), reserved)
+        bound = self.services.intake.endorsements.bound(ACTOR, first["candidate_id"], self.clock())
+        self.assertEqual(bound.envelope_sha256, hashlib.sha256(fresh).hexdigest())
+
     def test_another_actor_key_run_or_carried_key_refuses(self):
         announced = self.announce().json()
         self.assert_refused(self.endorse(announced, self.signed(announced), self.other_session), 404, "not_found")
