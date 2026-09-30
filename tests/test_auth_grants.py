@@ -5,6 +5,7 @@ from contextlib import contextmanager
 import hashlib
 import json
 import subprocess
+import unittest
 from unittest import mock
 
 from fiat_checkpoints.auth.refusals import AuthRefusal
@@ -37,6 +38,39 @@ def tampered(envelope):
     payload[payload.index(b"test")] = ord("T")
     value["payload"] = base64.b64encode(bytes(payload)).decode()
     return json.dumps(value, separators=(",", ":")).encode()
+
+
+def granted_or_code(projections, actor):
+    """`any_grant`'s answer, or the public code it refused with."""
+    try:
+        return projections.any_grant(actor, T0)
+    except AuthRefusal as refusal:
+        return refusal.code
+
+
+class AnyGrantTests(unittest.TestCase):
+    """The loop over allowlisted runs, with each run's projection stubbed; no verifier runs."""
+
+    def projections(self, answers):
+        projections = Projections.__new__(Projections)
+        projections._runs = {name: name for name in answers}
+
+        def current(run):
+            answer = answers[run]
+            if isinstance(answer, AuthRefusal):
+                raise answer
+            return mock.Mock(any_grant=mock.Mock(return_value=answer))
+
+        projections.current = current
+        return projections
+
+    def test_a_run_that_refuses_does_not_hide_a_grant_in_another_run(self):
+        broken = AuthRefusal("authority_unavailable", "trust-prefix-refused")
+        self.assertIs(granted_or_code(self.projections({"broken": broken, "granting": True}), ACTOR), True)
+        self.assertIs(granted_or_code(self.projections({"granting": True, "broken": broken}), ACTOR), True)
+        self.assertEqual(granted_or_code(self.projections({"broken": broken, "silent": False}), ACTOR),
+                         "authority_unavailable")
+        self.assertIs(granted_or_code(self.projections({"silent": False}), ACTOR), False)
 
 
 class TrustCase(DatabaseCase):
@@ -235,6 +269,26 @@ class StoredTrustTests(TrustCase):
                     self.assertEqual(self.refusal(lambda: restarted.any_grant(ACTOR, T0))[0], "authority_unavailable")
         finally:
             connection.close()
+
+    def test_a_run_that_no_longer_verifies_freezes_only_that_run(self):
+        contributor_journal(self.operator, self.contributor)
+        self.sync()
+        self.sync(self.other_run, self.other_operator)
+        connection = self.database.connect()
+        try:
+            connection.execute("ALTER TABLE trust_records DISABLE TRIGGER trust_records_immutable")
+            run_key = Projections._run_key(connection, self.other_run)
+            original = bytes(connection.execute("SELECT envelope FROM trust_records WHERE run_key = %s "
+                                                "AND sequence = 1", (run_key,)).fetchone()["envelope"])
+            connection.execute("UPDATE trust_records SET envelope = %s WHERE run_key = %s AND sequence = 1",
+                               (tampered(original), run_key))
+        finally:
+            connection.close()
+        # The broken run comes first, so pairing reaches it before the run that grants.
+        restarted = Projections(self.database, (self.other_run, self.run))
+        self.assertEqual(self.refusal(lambda: restarted.current(self.other_run))[0], "authority_unavailable")
+        self.assertIs(granted_or_code(restarted, ACTOR), True)
+        self.assertEqual(granted_or_code(restarted, OTHER_ACTOR), "authority_unavailable")
 
     def test_authority_events_name_kinds_and_codes_never_digests(self):
         with recorded_events() as events:

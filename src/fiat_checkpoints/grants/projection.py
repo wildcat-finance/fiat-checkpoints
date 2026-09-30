@@ -382,5 +382,19 @@ class Projections:
         return added
 
     def any_grant(self, actor_id, now):
-        """True when the actor holds a current grant of any permission in any allowlisted run."""
-        return any(self.current(run).any_grant(actor_id, now) for run in self._runs.values())
+        """True when the actor holds a current grant of any permission in any allowlisted run.
+
+        A run whose stored records no longer verify freezes that run only: a
+        current grant in another run still answers, and the refusal is raised
+        only when no run grants anything.
+        """
+        refused = None
+        for run in self._runs.values():
+            try:
+                if self.current(run).any_grant(actor_id, now):
+                    return True
+            except AuthRefusal as refusal:
+                refused = refused or refusal
+        if refused is not None:
+            raise refused
+        return False
