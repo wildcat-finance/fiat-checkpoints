@@ -168,6 +168,7 @@ class PinsTests(unittest.TestCase):
         self.assertIn("python3 scripts/check.py --group scaffold", commands)
         self.assertIn("python3 scripts/check.py --group protocol,domain", commands)
         self.assertIn("python3 scripts/check.py --group persistence,concurrency", commands)
+        self.assertIn("python3 scripts/check.py --group auth,endorsement", commands)
         self.assertIn("scripts/test-postgres.sh start", commands)
         self.assertIn("--volume fiat-checkpoints-postgres-socket:/run/fiat-postgres", commands)
         self.assertIn("--env FIAT_TEST_POSTGRES=/run/fiat-postgres", commands)
@@ -267,7 +268,8 @@ class ProvenanceTests(unittest.TestCase):
         for path in (ROOT / "migrations").iterdir():
             self.assertRegex(path.name, r"^\d{4}_[a-z0-9_]+\.sql$")
         package = ROOT / "src/fiat_checkpoints"
-        for name in ("auth", "grants", "validation"):
+        # Step 4 fills auth and grants; validation stays reserved for Step 6.
+        for name in ("validation",):
             with self.subTest(module=name):
                 self.assertEqual([p.name for p in (package / name).iterdir() if p.name != "__pycache__"],
                                  ["__init__.py"])

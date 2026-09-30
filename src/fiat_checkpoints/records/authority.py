@@ -114,6 +114,23 @@ class AuthorityRecords:
         exact = self._bounded(envelope)
         return self._wrap(exact, self._call(lambda: prefix.authenticate(exact)))
 
+    def grant_at(self, prefix, reference, actor_id, instant, permission):
+        """The released current-grant check: actor, permission, validity and live enrollment at `instant`."""
+        return self._call(lambda: self.library.eligibility.grant_at(prefix, reference, actor_id, instant, permission))
+
+    def signing_history(self, prefix, references):
+        """The released key-history check: the enrollments named, their rotation ancestors and revocations."""
+        return self._call(lambda: prefix.signing_history(references))
+
+    def verify_proof(self, challenge, signature):
+        """Check one proof of possession over a verified enrollment challenge, as enrollment does."""
+        if type(signature) is not str or not 0 < len(signature) <= 21_848:
+            raise RecordRefusal("request_invalid")
+        signatures = self.library.signatures
+        return self._call(lambda: signatures.verify_signature(
+            self.library.trust.proof_message(challenge), signatures.b64decode(signature, maximum=16_384),
+            challenge["key"], self.tools))
+
     def verify_with_key(self, envelope, key):
         """Authenticate one envelope with an already trusted key, in this service scope."""
         exact = self._bounded(envelope)

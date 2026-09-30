@@ -5,11 +5,12 @@ import logging
 
 
 # Candidate, attempt and job identifiers are random service ids for private
-# correlation. Actor ids, digests, tokens and bodies are never fields.
+# correlation. Actor ids, digests, tokens, keys and bodies are never fields;
+# `reason` and `protocol_code` hold only fixed vocabulary.
 FIELDS = (
     "event", "request_id", "route", "status", "codes", "duration_us",
     "candidate", "attempt", "job", "kind", "fence", "from_state", "to_state",
-    "code", "scope", "age_ms", "delay_ms", "count",
+    "code", "scope", "age_ms", "delay_ms", "count", "reason", "protocol_code",
 )
 
 
