@@ -61,8 +61,10 @@ taken in the fixed order global, run, actor. A refusal rolls back the key, the
 candidate and every counter. An upload lease reserves one stream against the
 actor and global counters before it is granted. Reservations are released
 exactly once: sealing releases the stream, rejection and expiry release
-everything. A validation pass keeps the candidate reservation, because an
-intent is not acceptance. Configuration may lower any ceiling, never raise it.
+everything. A lease that expires unsealed gives its stream back before the
+next stream is admitted. A validation pass keeps the candidate reservation,
+because an intent is not acceptance. Configuration may lower any ceiling,
+never raise it.
 
 ### Fenced leases
 
@@ -76,10 +78,11 @@ same result.
 
 ### Outbox and retries
 
-Jobs are claimed with `FOR UPDATE SKIP LOCKED`. A dependency outage keeps the
-candidate in its phase with a fixed `retry_reason` and reschedules the job
-with exponential backoff: half of a window of 2^(n-1) seconds, plus jitter
-over the other half, with the window capped at 300 seconds. A
+A claim locks the job's candidate with `FOR UPDATE SKIP LOCKED`, then the job,
+so it never holds a job while it waits for the candidate. A dependency outage
+keeps the candidate in its phase with a fixed `retry_reason` and reschedules
+the job with exponential backoff: half of a window of 2^(n-1) seconds, plus
+jitter over the other half, with the window capped at 300 seconds. A
 `validation_failed` tool failure holds the job for an operator after a
 configured number of attempts, at most 32.
 
@@ -96,7 +99,8 @@ decides between cancellation and signer authorization (issue #2).
 Each call is one READ COMMITTED transaction on its own connection. The
 candidate row is always locked before anything belonging to it, and quota
 rows are locked global, run, actor, so no two calls wait on each other in a
-cycle. A serialization failure or deadlock reruns the call up to eight times.
+cycle. A serialization failure or deadlock reruns the call up to eight times,
+and only the attempt that commits logs its events.
 Every other library failure becomes `database_unavailable` or
 `persistence_failed`, raised with no chained cause. Statements and lock waits
 time out after 10 seconds.
