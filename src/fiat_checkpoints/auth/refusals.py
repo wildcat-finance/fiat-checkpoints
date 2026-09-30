@@ -20,6 +20,9 @@ PUBLIC_STATUS = {
     "endorsement_invalid": 422,
     "signer_not_enrolled": 422,
     "protocol_refused": 422,
+    "length_required": 411,
+    "upload_too_large": 413,
+    "upload_integrity": 422,
     "quota_exceeded": 429,
     "idempotency_conflict": 409,
     "upload_in_progress": 409,
@@ -28,6 +31,7 @@ PUBLIC_STATUS = {
     "policy_unavailable": 503,
     "validation_failed": 503,
     "authority_unavailable": 503,
+    "storage_unavailable": 503,
     "capability_not_enabled": 501,
 }
 # Sections 13 and 16 ask a client to retry a quota or dependency refusal only
@@ -92,6 +96,16 @@ INTERNAL = {
     "identity_mismatch": "identity_mismatch",
     "database_unavailable": "policy_unavailable",
     "persistence_contention": "policy_unavailable",
+    # Step 5's transfer codes. A capability that is unknown or names another
+    # environment reads as a missing credential; one whose window, attempt or
+    # stream has ended reads as expired, and the client asks for a new one.
+    "upload_integrity": "upload_integrity",
+    "capability_unknown": "auth_required",
+    "capability_expired": "candidate_expired",
+    "stream_active": "upload_in_progress",
+    "endorsement_superseded": "endorsement_invalid",
+    "endorsement_expired": "endorsement_invalid",
+    "storage_unavailable": "storage_unavailable",
 }
 
 

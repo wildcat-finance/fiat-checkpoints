@@ -169,6 +169,7 @@ class PinsTests(unittest.TestCase):
         self.assertIn("python3 scripts/check.py --group protocol,domain", commands)
         self.assertIn("python3 scripts/check.py --group persistence,concurrency", commands)
         self.assertIn("python3 scripts/check.py --group auth,endorsement", commands)
+        self.assertIn("python3 scripts/check.py --group upload,quarantine", commands)
         self.assertIn("scripts/test-postgres.sh start", commands)
         self.assertIn("--volume fiat-checkpoints-postgres-socket:/run/fiat-postgres", commands)
         self.assertIn("--env FIAT_TEST_POSTGRES=/run/fiat-postgres", commands)
