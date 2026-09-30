@@ -1,5 +1,10 @@
 """Candidate states and the closed transition table of specification section 11.
 
+The table's rows follow the section 11 table. The diagram (specification line
+344) and the expiry paragraph (line 350) add one outcome the table leaves out:
+work the signer has durably authorized ends in complete publication or a
+signed denial, never an expiry or rejection. `denied` is that terminal state.
+
 A transition is legal only when its pair is in `TRANSITIONS` and the caller
 supplies exactly that row's evidence. The table decides nothing about whether
 the evidence is true; the owning step checks it before naming it here. No
@@ -25,6 +30,7 @@ class State(Enum):
     REJECTED = "rejected"
     EXPIRED = "expired"
     REVOKED = "revoked"
+    DENIED = "denied"
 
 
 class Evidence(Enum):
@@ -78,6 +84,9 @@ def _row(source, target, *evidence):
 # only the states before it may still end as rejected or expired.
 PRE_AUTHORIZATION = (State.ANNOUNCED, State.UPLOADING, State.QUARANTINED, State.VALIDATING,
                      State.PUBLISHING, State.AWAITING_REPLICA, State.AWAITING_SIGNATURE)
+# After authorization and before acceptance: publication or a signed denial only
+# (specification lines 344 and 350). A denial after acceptance is `revoked`.
+POST_AUTHORIZATION = (State.PUBLISHING_RECEIPT, State.FINALIZING, State.PUBLISHING_FINALIZATION)
 
 TRANSITIONS = dict((
     _row(State.ANNOUNCED, State.UPLOADING,
@@ -100,6 +109,7 @@ TRANSITIONS = dict((
       for state in PRE_AUTHORIZATION),
     *(_row(state, State.EXPIRED, Evidence.DEADLINE_ELAPSED, Evidence.CANCELLATION_WON)
       for state in PRE_AUTHORIZATION),
+    *(_row(state, State.DENIED, Evidence.SIGNED_DENIAL) for state in POST_AUTHORIZATION),
     _row(State.ACCEPTED, State.REVOKED, Evidence.SIGNED_DENIAL, Evidence.POISON_POLICY),
 ))
 

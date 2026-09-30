@@ -29,13 +29,22 @@ for state in (S.ANNOUNCED, S.UPLOADING, S.QUARANTINED, S.VALIDATING, S.PUBLISHIN
               S.AWAITING_REPLICA, S.AWAITING_SIGNATURE):
     EXPECTED[(state, S.REJECTED)] = {E.DETERMINISTIC_REFUSAL, E.NO_SIGNER_AUTHORIZATION}
     EXPECTED[(state, S.EXPIRED)] = {E.DEADLINE_ELAPSED, E.CANCELLATION_WON}
+# Specification lines 344 and 350: signer-authorized work ends in complete
+# publication or a signed denial. Looked up by value so the guard fails, rather
+# than errors, on a table without the state (S2-R1-03).
+DENIED = next((state for state in State if state.value == "denied"), None)
+AFTER_AUTHORIZATION = {S.PUBLISHING_RECEIPT: S.FINALIZING, S.FINALIZING: S.PUBLISHING_FINALIZATION,
+                       S.PUBLISHING_FINALIZATION: S.ACCEPTED}
+if DENIED is not None:
+    for state in AFTER_AUTHORIZATION:
+        EXPECTED[(state, DENIED)] = {E.SIGNED_DENIAL}
 
 
 class TransitionMatrixTests(unittest.TestCase):
     def test_table_is_the_specification_table(self):
         self.assertEqual({pair: set(row.evidence) for pair, row in TRANSITIONS.items()}, EXPECTED)
-        self.assertEqual(len(State), 14)
-        self.assertEqual(len(TRANSITIONS), 25)
+        self.assertEqual(len(State), 15)
+        self.assertEqual(len(TRANSITIONS), 28)
 
     def test_every_pair_is_legal_only_with_exactly_its_evidence(self):
         checked = 0
@@ -58,10 +67,10 @@ class TransitionMatrixTests(unittest.TestCase):
                             advance(source, target, required | {extra})
                         self.assertEqual(caught.exception.code, "transition-evidence")
             checked += 1
-        self.assertEqual(checked, 196)
+        self.assertEqual(checked, len(State) ** 2)
 
     def test_terminal_states_have_no_successor(self):
-        for state in (S.REJECTED, S.EXPIRED, S.REVOKED):
+        for state in (S.REJECTED, S.EXPIRED, S.REVOKED, DENIED):
             self.assertFalse([pair for pair in TRANSITIONS if pair[0] == state])
         self.assertEqual([pair[1] for pair in TRANSITIONS if pair[0] == S.ACCEPTED], [S.REVOKED])
 
@@ -71,6 +80,18 @@ class TransitionMatrixTests(unittest.TestCase):
             self.assertEqual(sources, set(PRE_AUTHORIZATION))
         for state in (S.PUBLISHING_RECEIPT, S.FINALIZING, S.PUBLISHING_FINALIZATION, S.ACCEPTED):
             self.assertNotIn(state, PRE_AUTHORIZATION)
+
+    def test_signer_authorized_work_ends_in_publication_or_signed_denial(self):
+        self.assertIsNotNone(DENIED)
+        for state, forward in AFTER_AUTHORIZATION.items():
+            with self.subTest(state=state.value):
+                self.assertEqual({pair[1] for pair in TRANSITIONS if pair[0] == state}, {forward, DENIED})
+                self.assertIs(advance(state, DENIED, {E.SIGNED_DENIAL}), DENIED)
+                for evidence in ({E.SIGNED_DENIAL, E.POISON_POLICY}, {E.DEADLINE_ELAPSED, E.CANCELLATION_WON}):
+                    with self.assertRaises(TransitionRefused):
+                        advance(state, DENIED, evidence)
+        self.assertEqual({pair[0] for pair in TRANSITIONS if pair[1] == DENIED}, set(AFTER_AUTHORIZATION))
+        self.assertEqual([pair[1] for pair in TRANSITIONS if pair[0] == S.ACCEPTED], [S.REVOKED])
 
     def test_happy_path_never_skips_a_phase(self):
         order = [S.ANNOUNCED, S.UPLOADING, S.QUARANTINED, S.VALIDATING, S.PUBLISHING, S.AWAITING_REPLICA,

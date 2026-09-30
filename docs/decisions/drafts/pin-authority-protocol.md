@@ -74,12 +74,15 @@ the library sees the bytes.
 
 ## Transition table
 
-`domain/transitions.py` holds the 25 rows of specification section 11: ten
-forward phases, `accepted` to `revoked`, and `rejected` or `expired` from each
-of the seven states before signer authorization. A transition needs exactly its
-row's evidence. The diagram's post-authorization "signed denial" has no row in
-that table, so it is not a candidate state here. A denial of accepted work is
-`accepted` to `revoked`.
+`domain/transitions.py` holds 28 rows: the 25 of the specification section 11
+table (ten forward phases, `accepted` to `revoked`, and `rejected` or `expired`
+from each of the seven states before signer authorization) and three rows the
+section's diagram and expiry paragraph require (specification lines 344 and
+350). Work the signer has durably authorized ends in complete publication or a
+signed denial, so `publishing_receipt`, `finalizing` and
+`publishing_finalization` each move to the terminal state `denied` on a signed
+denial, and none of them can be rejected or expire. A denial of accepted work
+stays `accepted` to `revoked`. A transition needs exactly its row's evidence.
 
 ## Alternatives
 
