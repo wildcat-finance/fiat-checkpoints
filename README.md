@@ -49,6 +49,17 @@ deployed, and the intake app refuses production like the health app. The
 [authentication decision](docs/decisions/drafts/bind-uploads-to-enrolled-keys.md)
 records session, key and endorsement custody.
 
+A recorded endorsement returns an upload capability. The upload gateway,
+`src/fiat_checkpoints/api/gateway.py`, takes it on one fixed route, counts and
+hashes the exact bytes into bounded staging, writes them to a fresh
+quarantine key, reads them back in full and only then seals the attempt.
+`src/fiat_checkpoints/upload/` holds the capability, staging, issuer and
+sweeper code; `src/fiat_checkpoints/storage/` holds the local quarantine store,
+and the live R2 adapter refuses to start. The
+[transfer decision](docs/decisions/drafts/seal-uploads-in-bounded-quarantine.md)
+records capability and staging lifetimes and the measured per-stream bounds,
+and [`docs/runbooks/`](docs/runbooks) holds the staging and cleanup records.
+
 ## Start locally
 
 Python 3.14.6 with the locked dependencies installed:
@@ -74,13 +85,15 @@ scripts/linux-env.sh run python3 scripts/check.py --group protocol,domain
 scripts/linux-env.sh db-start
 scripts/linux-env.sh run python3 scripts/check.py --group persistence,concurrency
 scripts/linux-env.sh run python3 scripts/check.py --group auth,endorsement
+scripts/linux-env.sh run python3 scripts/check.py --group upload,quarantine
 scripts/linux-env.sh facts
 ```
 
 `db-start` runs the digest-pinned PostgreSQL 16 test server with no network.
 The test container reaches it only through a Unix socket volume, and each test
-creates and drops its own database; the persistence, concurrency, auth and
-endorsement groups need it. `db-stop` removes the server.
+creates and drops its own database; the persistence, concurrency, auth,
+endorsement, upload and quarantine groups need it. `db-stop` removes the
+server.
 
 The build exports both protocol trees from a local clone of
 `wildcat-finance/skills` holding the two locked commits, and refuses unless

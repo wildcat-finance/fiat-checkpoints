@@ -21,13 +21,18 @@ parent directory remains outside the final-component symlink check.
 | `trust_profile` | A declaration of `local-test` or `production`; it loads no key |
 | `protocol_lock` | Null or `protocol.lock.json`; production runs the released `lock` check on it |
 | `sandbox_profile` | `unavailable` or `gvisor`; neither establishes isolation |
-| `request_max_bytes`, `carrier_max_bytes` | Positive limits capped at 65,536 and 1,073,741,824 bytes; intake is absent |
+| `request_max_bytes`, `carrier_max_bytes` | Positive limits capped at 65,536 and 1,073,741,824 bytes; the upload gateway refuses a declared length above `carrier_max_bytes` and may only lower it |
 | `validation_concurrency` | A local declaration from 1 through 4; no worker is launched |
 
 Production returns fixed startup codes for test trust, a missing or refused
 protocol pin and unavailable isolation, plus `scaffold-only`. A lock or tree
 that fails its check adds its own `protocol-*` code. Even a passing lock cannot
-enable production while isolation is unavailable. Health reveals neither
+enable production while isolation is unavailable. The upload gateway and the
+live quarantine adapter refuse production with the same codes. A local
+gateway also refuses `proxy-body-limit` or `proxy-buffering` behind an edge
+that cannot carry the carrier ceiling as it arrives, and
+`staging-unavailable` or `quarantine-unavailable` for a missing, linked or
+shared directory. Health reveals neither
 configuration nor private inventory. The production configuration fields in
 specification section 18 remain prerequisites for later implementation.
 
