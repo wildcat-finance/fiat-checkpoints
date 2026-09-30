@@ -21,12 +21,13 @@ enters this tree. Ever.
 
 ## Current state
 
-The scaffold and the pinned protocol exist, and admission is closed. The
-service answers `GET /health/live` with 200 and `GET /health/ready` with 503 and
-the code `intake-closed`. Every production start refuses: a test trust root, a
-missing or refused protocol pin and unavailable isolation each have a fixed
-startup code, and the scaffold adds `scaffold-only`. The
-[configuration contract](config/README.md) lists the fields and codes.
+The scaffold, the pinned protocol and PostgreSQL coordination exist, and
+admission is closed. The service answers `GET /health/live` with 200 and
+`GET /health/ready` with 503 and the code `intake-closed`. Every production
+start refuses: a test trust root, a missing or refused protocol pin and
+unavailable isolation each have a fixed startup code, and the scaffold adds
+`scaffold-only`. The [configuration contract](config/README.md) lists the
+fields and codes.
 
 [`protocol.lock.json`](protocol.lock.json) pins the released authority
 protocol, and [`protocol.trees.json`](protocol.trees.json) lists the bytes of
