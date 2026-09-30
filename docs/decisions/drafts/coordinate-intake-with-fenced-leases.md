@@ -92,7 +92,10 @@ The sweeper expires only `announced`, `uploading`, `quarantined` and
 `validating` candidates. Before an intent exists nothing can have reached a
 signer, so the service's own cancellation is the only cancellation. Once an
 intent exists the candidate waits for its publication owner, whose journal
-decides between cancellation and signer authorization (issue #2).
+decides between cancellation and signer authorization (issue #2). Until
+issue #2 consumes intents, each one keeps its candidate and byte reservation,
+so 5 per actor, 20 per run or 100 overall stop new announces; issue #2 carries
+the release path.
 
 ### Transactions and failures
 
