@@ -41,6 +41,14 @@ and the outbox in PostgreSQL 16. Nothing there can mark a checkpoint accepted.
 The [coordination decision](docs/decisions/drafts/coordinate-intake-with-fenced-leases.md)
 records the table layout, idempotency scope and lease rules.
 
+`src/fiat_checkpoints/auth/` and `src/fiat_checkpoints/grants/` authenticate a
+contributor by numeric identity, session and CSRF token, verify each run's
+operator-signed trust records through the released library, and bind one
+signed upload endorsement to each announced candidate. No identity provider is
+deployed, and the intake app refuses production like the health app. The
+[authentication decision](docs/decisions/drafts/bind-uploads-to-enrolled-keys.md)
+records session, key and endorsement custody.
+
 ## Start locally
 
 Python 3.14.6 with the locked dependencies installed:
@@ -65,12 +73,14 @@ scripts/linux-env.sh run python3 scripts/check.py --group scaffold
 scripts/linux-env.sh run python3 scripts/check.py --group protocol,domain
 scripts/linux-env.sh db-start
 scripts/linux-env.sh run python3 scripts/check.py --group persistence,concurrency
+scripts/linux-env.sh run python3 scripts/check.py --group auth,endorsement
 scripts/linux-env.sh facts
 ```
 
 `db-start` runs the digest-pinned PostgreSQL 16 test server with no network.
 The test container reaches it only through a Unix socket volume, and each test
-creates and drops its own database. `db-stop` removes the server.
+creates and drops its own database; the persistence, concurrency, auth and
+endorsement groups need it. `db-stop` removes the server.
 
 The build exports both protocol trees from a local clone of
 `wildcat-finance/skills` holding the two locked commits, and refuses unless
