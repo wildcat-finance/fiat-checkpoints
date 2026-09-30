@@ -7,8 +7,15 @@ from unittest import mock
 
 import psycopg
 
+from datetime import datetime
+
 from fiat_checkpoints.api.app import StartupRefusal
-from fiat_checkpoints.domain.coordination import CoordinationRefusal
+from fiat_checkpoints.domain.coordination import CoordinationRefusal, Lease
+from fiat_checkpoints.persistence.migrations import load_migrations
+from fiat_checkpoints.persistence.transfer import object_key
+from fiat_checkpoints.upload.capability import capability_sha256
+from fiat_checkpoints.upload.sweeper import Sweeper
+from tests.upload_support import ACTOR, SCOPE, SETTINGS
 from fiat_checkpoints.storage.quarantine import DirectoryQuarantine, QuarantineError, read_back
 from fiat_checkpoints.upload.staging import StagingArea, StagingRefusal, stage_sealed
 from tests.upload_support import CHUNK, UploadCase, body_steps, effect, payload, sha256
@@ -299,3 +306,69 @@ class StagingAreaTests(UploadCase):
             reservation.write(b"0" * 11)
         self.assertEqual(caught.exception.code, "body_extra")
         reservation.close()
+
+
+class EntryPointTests(UploadCase):
+    """Every transfer entry point answers malformed input with a fixed code before any statement runs."""
+
+    def test_transfer_calls_refuse_malformed_arguments(self):
+        data = payload(CHUNK)
+        candidate, capability = self.ready(data)
+        naive = datetime(2026, 9, 30, 12, 0)
+        lease = Lease(candidate, "upload", 1, 1, self.clock_now)
+        bound = self.endorsements.bound(ACTOR, candidate, self.clock_now)
+        hashed = capability_sha256(capability.value)
+        key = object_key(candidate, 1, "a" * 32)
+        calls = [
+            lambda: self.transfers.issue("scope", ACTOR, candidate, bound, "0" * 64, "env", self.clock_now,
+                                         self.clock_now),
+            lambda: self.transfers.issue(SCOPE, 0, candidate, bound, "0" * 64, "env", self.clock_now, self.clock_now),
+            lambda: self.transfers.issue(SCOPE, ACTOR, candidate, bound, "G" * 64, "env", self.clock_now,
+                                         self.clock_now),
+            lambda: self.transfers.issue(SCOPE, ACTOR, candidate, object(), "0" * 64, "env", self.clock_now,
+                                         self.clock_now),
+            lambda: self.transfers.issue(SCOPE, ACTOR, candidate, bound, "0" * 64, "Env!", self.clock_now,
+                                         self.clock_now),
+            lambda: self.transfers.issue(SCOPE, ACTOR, candidate, bound, "0" * 64, "env", naive, naive),
+            lambda: self.transfers.capability("x"),
+            lambda: self.transfers.start(hashed, "quarantine/../x", SETTINGS.environment_id, self.clock_now),
+            lambda: self.transfers.start(hashed, None, SETTINGS.environment_id, self.clock_now),
+            lambda: self.transfers.start(hashed, key, "", self.clock_now),
+            lambda: self.transfers.fail("lease", "upload_integrity", self.clock_now),
+            lambda: self.transfers.fail(lease, "Upload-Integrity", self.clock_now),
+            lambda: self.transfers.seal_stream(lease, 0, "0" * 64, key, 1, "0" * 64, self.clock_now),
+            lambda: self.transfers.seal_stream(lease, CHUNK, "0" * 64, "key", 1, "0" * 64, self.clock_now),
+            lambda: self.transfers.seal_stream(lease, CHUNK, "0" * 64, key, 289, "0" * 64, self.clock_now),
+            lambda: self.transfers.sealed_object(candidate, 17),
+            lambda: self.transfers.mark_deleted(["not-a-key"], self.clock_now),
+            lambda: self.transfers.claim_lifecycle([key] * 1001, self.clock_now),
+            lambda: self.transfers.claim_deletions(self.clock_now, 0),
+            lambda: self.transfers.release_held("x", self.clock_now),
+            lambda: self.transfers.attempt_state(SCOPE, ACTOR, "not-a-uuid"),
+            lambda: Sweeper(self.transfers, None, self.quarantine).run(naive),
+        ]
+        for index, call in enumerate(calls):
+            with self.subTest(call=index), self.assertRaises(CoordinationRefusal) as caught:
+                call()
+            self.assertIn(caught.exception.code, {"request_invalid", "not_found", "lease_stale"})
+        self.assertEqual(self.attempts(candidate), [(1, "open")])
+
+    def test_a_replayed_seal_matches_its_quarantine_key_too(self):
+        data = payload(CHUNK)
+        candidate, capability = self.ready(data)
+        self.assertEqual(self.upload(candidate, capability, data).status, 202)
+        recorded = self.transfers.sealed_object(candidate, 1)
+        fence = self.scalar("SELECT fence FROM upload_attempts")
+        lease = Lease(candidate, "upload", 1, fence, self.clock_now)
+        endorsement = self.scalar("SELECT endorsement_sha256 FROM upload_capabilities")
+        self.assertEqual(self.transfers.seal_stream(lease, len(data), sha256(data), recorded.object_key, 1,
+                                                    endorsement, self.clock_now), 1)
+        with self.assertRaises(CoordinationRefusal) as caught:
+            self.transfers.seal_stream(lease, len(data), sha256(data), object_key(candidate, 1, "f" * 32), 1,
+                                       endorsement, self.clock_now)
+        self.assertEqual(caught.exception.code, "lease_stale")
+
+    def test_the_shipped_migrations_end_with_the_transfer_migration(self):
+        self.assertEqual([(item.version, item.name) for item in load_migrations()],
+                         [(1, "coordination"), (2, "authentication"), (3, "transfer")])
+        self.assertEqual(self.scalar("SELECT max(version) FROM schema_migrations"), 3)

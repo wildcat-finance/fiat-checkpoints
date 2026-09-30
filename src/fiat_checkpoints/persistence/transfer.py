@@ -401,6 +401,14 @@ class Transfers(Coordinator):
                     candidate["state"] == "expired" or now >= candidate["expires_at"]):
                 return CoordinationRefusal("candidate_expired")
             row, checked = self._seal_check(connection, events, lease, sealed_size, sealed_sha256, now)
+            if type(checked) is int:
+                # A replay matches only the seal it repeats, quarantine key included.
+                recorded = connection.execute(
+                    "SELECT 1 FROM quarantine_objects WHERE object_key = %s AND candidate_id = %s "
+                    "AND attempt_number = %s AND state = 'sealed' AND sealed_size = %s AND sealed_sha256 = %s",
+                    (object_key_value, lease.candidate_id, lease.attempt_number, sealed_size,
+                     sealed_sha256)).fetchone()
+                return checked if recorded is not None else CoordinationRefusal("lease_stale")
             if checked is not None:
                 return checked
             latest = connection.execute(

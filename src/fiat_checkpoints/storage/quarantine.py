@@ -134,9 +134,15 @@ class DirectoryQuarantine(QuarantineStore):
             os.fchmod(target, 0o400)
         except OSError as error:
             os.close(target)
-            self._remove(name)
+            try:
+                self._remove(name)
+            except OSError:
+                pass
             raise QuarantineError("quarantine_full" if error.errno in FULL else "quarantine_unavailable") from None
-        os.close(target)
+        try:
+            os.close(target)
+        except OSError:
+            raise QuarantineError("quarantine_unavailable") from None
 
     def read(self, key, chunk_bytes=CHUNK_BYTES):
         name = _file_name(key)
@@ -149,7 +155,11 @@ class DirectoryQuarantine(QuarantineStore):
             # A link planted at the object's name fails here with ELOOP.
             raise QuarantineError("quarantine_unavailable") from None
         try:
-            if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            try:
+                regular = stat.S_ISREG(os.fstat(descriptor).st_mode)
+            except OSError:
+                regular = False
+            if not regular:
                 raise QuarantineError("quarantine_unavailable")
             while True:
                 try:

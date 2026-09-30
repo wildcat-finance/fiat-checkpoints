@@ -129,7 +129,10 @@ class StagingArea:
             raise StagingRefusal("staging_unavailable") from None
         for name in names:
             if name not in active:
-                self._unlink(name)
+                try:
+                    self._unlink(name)
+                except OSError:
+                    raise StagingRefusal("staging_unavailable") from None
                 removed += 1
         return removed
 
@@ -186,7 +189,11 @@ class Reservation:
         return self.count, self._digest.hexdigest()
 
     def close(self):
-        """Remove the file this reservation created, never one another writer put at its name."""
+        """Remove the file this reservation created, never one another writer put at its name.
+
+        Closing never raises: a file it could not remove is a leftover that
+        `StagingArea.sweep` or the next start removes.
+        """
         if self.closed:
             return
         self.closed = True
@@ -199,8 +206,14 @@ class Reservation:
                     found = None
                 if found is not None and (found.st_dev, found.st_ino) == (ours.st_dev, ours.st_ino):
                     self.area._unlink(self.name)
-                os.close(self.descriptor)
+        except OSError:
+            pass
         finally:
+            if self.descriptor is not None:
+                try:
+                    os.close(self.descriptor)
+                except OSError:
+                    pass
             self.area._release(self)
 
 
@@ -231,7 +244,10 @@ def stage_sealed(store, sealed, job_directory):
     digest refuses as `staging_mismatch`, which the caller treats as a
     storage-integrity failure, and no job file remains.
     """
-    directory = _open_directory(job_directory)
+    try:
+        directory = _open_directory(job_directory)
+    except StartupRefusal:
+        raise StagingRefusal("staging_unavailable") from None
     name = secrets.token_hex(16) + ".input"
     writer = None
     try:
@@ -257,10 +273,13 @@ def stage_sealed(store, sealed, job_directory):
             getattr(chunks, "close", lambda: None)()
         if count != sealed.sealed_size or not hmac.compare_digest(digest.hexdigest(), sealed.sealed_sha256):
             raise StagingRefusal("staging_mismatch")
-        os.fsync(writer)
-        os.fchmod(writer, 0o400)
-        reader = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=directory)
-        written, opened = os.fstat(writer), os.fstat(reader)
+        try:
+            os.fsync(writer)
+            os.fchmod(writer, 0o400)
+            reader = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=directory)
+            written, opened = os.fstat(writer), os.fstat(reader)
+        except OSError as error:
+            raise StagingRefusal("staging_full" if error.errno in FULL else "staging_unavailable") from None
         if (written.st_dev, written.st_ino) != (opened.st_dev, opened.st_ino) or opened.st_size != count:
             os.close(reader)
             raise StagingRefusal("staging_mismatch")

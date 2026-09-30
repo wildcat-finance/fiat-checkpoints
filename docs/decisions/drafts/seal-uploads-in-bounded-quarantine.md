@@ -222,5 +222,8 @@ capability replays. `Coordinator.begin_upload` still opens attempts with no
 capability for persistence callers. Only capability attempts must seal beside a
 read-back record, and no route reaches `begin_upload`. The gateway checks the
 grant when the stream starts and again before the seal, not at the seal commit;
-Step 6 checks run and key scope again before any intent. The live R2 adapter,
+Step 6 checks run and key scope again before any intent. The idle and absolute
+limits bound the body; the quarantine write and read-back after it are bounded
+only by the store's own call timeouts, which the local store needs no more
+than its disk does and the live adapter must set. The live R2 adapter,
 its lifecycle rule and the tested proxy limit are Skills #863 evidence.
