@@ -9,6 +9,8 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from fiat_checkpoints.config import Settings
+from fiat_checkpoints.records.refusals import RecordRefusal
+from fiat_checkpoints.records.trees import DEFAULT_TREES, load_release
 
 
 LOGGER = logging.getLogger("fiat_checkpoints")
@@ -22,23 +24,29 @@ class StartupRefusal(Exception):
         super().__init__("intake-closed")
 
 
-def production_refusals(settings: Settings, root: Path):
-    """Name known blockers without parsing a prospective protocol release."""
+def production_refusals(settings: Settings, root: Path, trees: Path = DEFAULT_TREES):
+    """Name every known blocker; a shipped lock must pass the released lock check."""
     if settings.profile == "local":
         return ()
     codes = []
     if settings.trust_profile == "local-test" or settings.environment_id.endswith("-local"):
         codes.append("test-trust-forbidden")
-    if settings.protocol_lock is None or not (root / "protocol.lock.json").is_file():
+    if settings.protocol_lock is None:
         codes.append("protocol-pin-missing")
+    else:
+        # The released lock check runs over the read-only trees before anything else.
+        try:
+            load_release(root, trees)
+        except RecordRefusal as error:
+            codes.append(error.code)
     # A declared runtime name cannot establish isolation that has not been built.
     codes.extend(("isolation-unavailable", "scaffold-only"))
     return tuple(codes)
 
 
-def create_app(settings: Settings, root: Path):
+def create_app(settings: Settings, root: Path, trees: Path = DEFAULT_TREES):
     """Return the local health app, or refuse every production start."""
-    refusals = production_refusals(settings, root)
+    refusals = production_refusals(settings, root, trees)
     if refusals:
         raise StartupRefusal(refusals)
     app = FastAPI(openapi_url=None, docs_url=None, redoc_url=None,

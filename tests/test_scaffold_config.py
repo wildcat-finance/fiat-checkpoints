@@ -108,7 +108,8 @@ class ConfigurationTests(unittest.TestCase):
             (root / "protocol.lock.json").write_bytes(b"untrusted opaque bytes")
             with self.assertRaises(StartupRefusal) as caught:
                 create_app(settings, root)
-            self.assertEqual(caught.exception.codes, ("isolation-unavailable", "scaffold-only"))
+            self.assertEqual(caught.exception.codes,
+                             ("protocol-lock-malformed", "isolation-unavailable", "scaffold-only"))
 
     def test_error_does_not_repeat_supplied_value(self):
         marker = "configuration-private-marker"

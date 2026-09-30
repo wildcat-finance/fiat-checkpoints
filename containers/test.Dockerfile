@@ -10,5 +10,20 @@ RUN /opt/tools/bin/uv sync --project /build/project --locked --no-config \
     --no-install-project --python /usr/local/bin/python3.14 \
     && rm -rf /build
 ENV PATH=/opt/venv/bin:/opt/tools/bin:$PATH UV_OFFLINE=1
+# The two protocol trees come from `scripts/protocol_trees.py export`, which
+# checks every file against protocol.trees.json. They stay root-owned and
+# read-only; the build refuses unless the service loader accepts them as the
+# unprivileged user, including the released `lock` check.
+COPY .protocol-trees/authority /opt/fiat-checkpoints/protocol/authority
+COPY .protocol-trees/native /opt/fiat-checkpoints/protocol/native
+COPY protocol.lock.json protocol.trees.json /build/check/
+COPY src/fiat_checkpoints /build/check/src/fiat_checkpoints
+RUN chmod -R a-w /opt/fiat-checkpoints/protocol
+USER 65532:65532
+RUN python3 -I -c "import sys; sys.path.insert(0, '/build/check/src'); \
+from fiat_checkpoints.records.trees import load_release; \
+print(load_release('/build/check', '/opt/fiat-checkpoints/protocol').lock_check['code'])"
+USER 0:0
+RUN rm -rf /build
 USER 65532:65532
 CMD ["python3", "scripts/check.py", "--group", "scaffold"]

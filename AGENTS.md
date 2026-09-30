@@ -11,9 +11,12 @@ appended. Controller records under `.hexaemeron/` stay local and untracked.
 
 ## Current boundary
 
-Only the scaffold is implemented. Production startup and readiness stay
-closed. Never invent `protocol.lock.json`, a protocol schema, an accepted
-checkpoint or isolation evidence. Keep API, upload gateway, staging broker and
+The scaffold and the pinned protocol are implemented. Production startup and
+readiness stay closed. `protocol.lock.json` and `protocol.trees.json` change
+only with a new protocol release; regenerate the manifest with
+`scripts/protocol_trees.py manifest`. Call the released library for records,
+signatures and trust instead of reimplementing it. Never invent a protocol
+schema, an accepted checkpoint or isolation evidence. Keep API, upload gateway, staging broker and
 credential-free validator as separate roles. Empty module and migration
 locations reserve places; they establish no behaviour.
 

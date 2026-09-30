@@ -2,7 +2,7 @@
 # Run a command in the pinned x86_64 Linux test environment.
 #
 #   scripts/linux-env.sh start          create or start the colima profile
-#   scripts/linux-env.sh build          build the pinned test image
+#   scripts/linux-env.sh build          build the pinned test image (needs SKILLS_REPO)
 #   scripts/linux-env.sh facts          print kernel, architecture and image id
 #   scripts/linux-env.sh run CMD...     run CMD in the image at this checkout
 #
@@ -35,6 +35,11 @@ case "${1:-}" in
       --mount "$ROOT:w" --mount "$GIT_COMMON"
     ;;
   build)
+    # The protocol trees come from a local Skills clone at the locked commits.
+    [ -n "${SKILLS_REPO:-}" ] || refuse skills-repo-missing
+    rm -rf "$ROOT/.protocol-trees"
+    python3 "$ROOT/scripts/protocol_trees.py" export --skills-repo "$SKILLS_REPO" \
+      --out "$ROOT/.protocol-trees"
     exec docker --context "$CONTEXT" build --platform linux/amd64 -f "$ROOT/containers/test.Dockerfile" \
       -t "$IMAGE" "$ROOT"
     ;;

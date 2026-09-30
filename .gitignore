@@ -2,6 +2,7 @@
 .elenchus/
 .reports/
 .venv/
+.protocol-trees/
 __pycache__/
 *.py[cod]
 .env
