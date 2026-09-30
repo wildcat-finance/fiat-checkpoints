@@ -6,8 +6,8 @@ then compares every field it bound itself: the authenticated numeric actor,
 the candidate, the nonce announce issued, the run, all three checkpoint
 identities by role, the carrier length and the parent link. It also requires
 the endorsement to have been signed after its challenge was issued and not
-after now, and to be unexpired now. Only after all of that, and with the trust
-head unchanged, is the endorsement recorded, once per challenge.
+after now, and to be unexpired now. Only then, with the trust head unchanged,
+does it record the endorsement, once per challenge.
 
 A candidate can take a fresh endorsement before signer authorization: once an
 endorsement has spent the candidate's challenge, a replayed announce issues

@@ -1,8 +1,8 @@
 """Login state, browser sessions, CLI access tokens and CSRF (specification section 8).
 
 Every secret here is shown once and stored only as its SHA-256. Login state
-lives five minutes, is used once and binds the browser that started it. A
-session lives at most eight hours. An access token lives at most fifteen
+lasts five minutes, is used once and binds the browser that started it. A
+session lasts at most eight hours. An access token lasts at most fifteen
 minutes, names one audience and environment, and dies with its session.
 Logout revokes the session and every token paired from it.
 
