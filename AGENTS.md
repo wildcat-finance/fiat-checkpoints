@@ -15,15 +15,15 @@ The scaffold, the pinned protocol, PostgreSQL coordination, contributor
 authentication with upload endorsement and the bounded upload gateway with
 its quarantine sweeper are implemented; SQL coordinates work and never records
 acceptance or authority. An attempt seals only after the gateway has read its
-quarantine object back in full; never seal one another way. Production startup and
-readiness stay closed. `protocol.lock.json` and `protocol.trees.json` change
-only with a new protocol release; regenerate the manifest with
-`scripts/protocol_trees.py manifest`. Call the released library for records,
-signatures and trust instead of reimplementing it. Never invent a protocol
-schema, an accepted checkpoint or isolation evidence. Keep API, upload gateway,
-staging broker and credential-free validator as separate roles. Empty module
-locations reserve places; they establish no behaviour. A new table or column
-arrives in a new numbered migration; never edit an applied one.
+quarantine object back in full; seal no attempt any other way. Production
+startup and readiness stay closed. `protocol.lock.json` and
+`protocol.trees.json` change only with a new protocol release; regenerate the
+manifest with `scripts/protocol_trees.py manifest`. Call the released library
+for records, signatures and trust instead of reimplementing it. Never invent a
+protocol schema, an accepted checkpoint or isolation evidence. Keep API, upload
+gateway, staging broker and credential-free validator as separate roles. Empty
+module locations reserve places; they establish no behaviour. A new table or
+column arrives in a new numbered migration; never edit an applied one.
 
 ## Checks
 
@@ -34,8 +34,8 @@ group is a new `tests/test_<group>*.py` module; `scripts/check.py` itself is
 pinned by the runbook. A test class that starts a child process sets
 `spawns_child_process = True`. Missing groups, zero tests and skips refuse
 success. The `persistence`, `concurrency`, `auth`, `endorsement`, `upload`
-and `quarantine` groups need `scripts/linux-env.sh db-start` first. Keep a failure's evidence and find
-its cause before changing code.
+and `quarantine` groups need `scripts/linux-env.sh db-start` first. Keep a
+failure's evidence and find its cause before changing code.
 
 ## Records and data
 

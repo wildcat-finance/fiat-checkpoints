@@ -114,9 +114,9 @@ The gateway refuses before reading a byte:
 | Staging or quarantine write, full disk or late object | 503 `storage_unavailable`, `Retry-After: 30` |
 | Read-back of other bytes, or an occupied key holding other bytes | 503 `authority_unavailable`, `Retry-After: 30` |
 
-`storage_unavailable` is an implementation choice. Section 16 gives three example
-codes for the dependency-unavailable class, and a storage outage is a fourth
-member of it (accepted 2026-10-01).
+`storage_unavailable` is an implementation choice. Section 16 gives three
+example codes for the dependency-unavailable class, and a storage outage is a
+fourth member of it (accepted 2026-10-01).
 
 The staging directory is opened once with `O_NOFOLLOW` and refused if group- or
 world-writable. A stream reserves its declared size against the area's capacity
@@ -133,15 +133,15 @@ before any byte reaches the store. After the stream, the gateway checks the
 grant again, creates the key from the staged descriptor and reads it back,
 counting and hashing every byte. It reads a missing object up to five times,
 pausing 50 ms longer before each retry. An occupied key passes only with
-exactly the declared bytes. `seal_stream` then seals the quarantine record and the attempt
-in one transaction. A trigger refuses to seal a capability's attempt unless its
-quarantine record is sealed with the same size and digest. Other triggers
-refuse any change to a sealed attempt, to a sealed record's size or digest, and
-to a capability after its stream started. A failed stream fails its attempt
-and returns its stream reservation in the same transaction. It deletes the
-object it wrote only once the attempt is known unsealed. An object that failed
-its read-back is held as evidence, outside every sweep, until an operator
-releases it.
+exactly the declared bytes. `seal_stream` then seals the quarantine record and
+the attempt in one transaction. A trigger refuses to seal a capability's
+attempt unless its quarantine record is sealed with the same size and digest.
+Other triggers refuse any change to a sealed attempt, to a sealed record's size
+or digest, and to a capability after its stream started. A failed stream fails
+its attempt and returns its stream reservation in the same transaction. It
+deletes the object it wrote only once the attempt is known unsealed. An object
+that failed its read-back is held as evidence, outside every sweep, until an
+operator releases it.
 
 `DirectoryQuarantine` is the local store: conditional create through a held
 directory, read-only objects and no link followed. `R2Quarantine` refuses to
