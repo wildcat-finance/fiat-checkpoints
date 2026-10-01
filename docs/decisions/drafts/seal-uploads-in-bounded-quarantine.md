@@ -98,6 +98,10 @@ The gateway refuses before reading a byte:
 | Staging or quarantine write, full disk or late object | 503 `storage_unavailable`, `Retry-After: 30` |
 | Read-back of other bytes, or an occupied key holding other bytes | 503 `authority_unavailable`, `Retry-After: 30` |
 
+`storage_unavailable` is an implementation choice. Section 16 gives three example
+codes for the dependency-unavailable class, and a storage outage is a fourth
+member of it (accepted 2026-10-01).
+
 The staging directory is opened once with `O_NOFOLLOW` and refused if group- or
 world-writable. A stream reserves its declared size against the area's capacity
 before reading, and the filesystem must keep `floor_bytes` free after it. Each
