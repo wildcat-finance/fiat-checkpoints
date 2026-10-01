@@ -67,6 +67,11 @@ the stream ends or its lease expires (Laurence, 2026-10-01).
 | A new endorsement while a stream is live | 409 `upload_in_progress`, nothing recorded |
 | Issue while a stream is live | 409 `upload_in_progress` |
 | The actor's or the service's streams are all reserved, or an attempt's 1,024 issues are spent | 429 `quota_exceeded`, `Retry-After: 60` |
+| All 16 attempts have failed | 410 `candidate_expired`, no `Retry-After`; its status carries code `candidate_expired` |
+
+Once all 16 attempts have failed no retry can succeed, so a new attempt or
+capability refuses as expired and the contributor reannounces; the candidate
+keeps its quota reservation until its deadline (Laurence, 2026-10-01).
 
 | Lifetime | Value | Where it is enforced |
 | --- | --- | --- |

@@ -6,7 +6,7 @@ import json
 import secrets
 from types import SimpleNamespace
 
-from fiat_checkpoints.auth.refusals import AuthRefusal
+from fiat_checkpoints.auth.refusals import AuthRefusal, public
 from fiat_checkpoints.domain.coordination import CoordinationRefusal, QuotaPolicy
 from fiat_checkpoints.domain.identities import CheckpointIdentities
 from fiat_checkpoints.grants.endorsement import Terms
@@ -18,7 +18,7 @@ from unittest import mock
 
 from fiat_checkpoints.persistence import transfer as transfer_module
 from tests.upload_support import (ACTOR, CHUNK, OTHER_ACTOR, PARENT, SCOPE, SETTINGS, UploadCase, body_steps, effect,
-                                  exchange, pause, payload, revoked, run, sha256)
+                                  disconnect, exchange, pause, payload, revoked, run, sha256)
 
 
 class IssueTests(UploadCase):
@@ -385,3 +385,59 @@ class LiveStreamEndorsementTests(UploadCase):
                                  ("CoordinationRefusal", "endorsement_superseded", "Endorsed", None)})
             outcomes.add(pair[0])
             self.assertEqual(self.stored(candidate), 1 if pair[0] == "Stream" else 2)
+
+
+class SpentAttemptTests(UploadCase):
+    """Once all 16 attempts have failed no retry can succeed (Laurence, 2026-10-01)."""
+
+    def fail_attempts(self, data, count):
+        candidate, capability = self.ready(data, lifetime=300)
+        for number in range(count):
+            self.assert_refused(self.put(candidate, capability, body_steps(data)[:1] + [disconnect()]), 422,
+                                "upload_integrity")
+            if number < count - 1:
+                capability = self.issuer.issue(ACTOR, candidate, self.clock_now)
+        return candidate
+
+    def issuer_refusal(self, candidate):
+        with self.assertRaises(CoordinationRefusal) as caught:
+            self.issuer.issue(ACTOR, candidate, self.clock_now)
+        return caught.exception
+
+    def test_a_candidate_whose_sixteen_attempts_failed_answers_expired_without_a_retry(self):
+        data = payload(2 * CHUNK)
+        candidate = self.fail_attempts(data, 16)
+        with self.assertRaises(CoordinationRefusal) as caught:
+            self.issuer.issue(ACTOR, candidate, self.clock_now)
+        refusal = public(caught.exception)
+        self.assertEqual((refusal.status, refusal.code, refusal.retry_after_seconds), (410, "candidate_expired", None))
+        self.assertEqual([state for _number, state in self.attempts(candidate)], ["failed"] * 16)
+        # Its quota stays reserved until the deadline, and nothing about it changed.
+        self.assertEqual(self.state(candidate), "uploading")
+        self.assertEqual(self.scalar("SELECT count(*) FROM reservations WHERE candidate_id = %s AND kind = "
+                                     "'candidate' AND released_at IS NULL", (candidate,)), 1)
+        self.assert_quota_consistent()
+
+    def test_a_candidate_with_an_attempt_left_keeps_its_answers(self):
+        data = payload(2 * CHUNK)
+        candidate = self.fail_attempts(data, 15)
+        last = self.issuer.issue(ACTOR, candidate, self.clock_now)
+        self.assertEqual((last.attempt_number, last.renewed), (16, False))
+        # An unstarted last attempt is renewed rather than refused.
+        renewed = self.issuer.issue(ACTOR, candidate, self.clock_now)
+        self.assertEqual((renewed.attempt_number, renewed.renewed), (16, True))
+        self.assertEqual(self.upload(candidate, renewed, data).status, 202)
+
+    def test_a_last_stream_that_died_answers_expired_once_its_lease_ends(self):
+        data = payload(2 * CHUNK)
+        candidate = self.fail_attempts(data, 15)
+        last = self.issuer.issue(ACTOR, candidate, self.clock_now)
+        self.transfers.start(capability_sha256(last.value), object_key(candidate, 16, "b" * 32),
+                             SETTINGS.environment_id, self.clock_now)
+        self.assertEqual(self.issuer_refusal(candidate).code, "upload_in_progress")
+        # Past the lease, with an endorsement the contributor could still record then.
+        self.advance(1800)
+        self.endorse(candidate, data, lifetime=300)
+        with self.assertRaises(CoordinationRefusal) as caught:
+            self.issuer.issue(ACTOR, candidate, self.clock_now)
+        self.assertEqual((public(caught.exception).status, public(caught.exception).retry_after_seconds), (410, None))

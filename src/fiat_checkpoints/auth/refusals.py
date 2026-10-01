@@ -87,7 +87,9 @@ INTERNAL = {
     "request_invalid": "request_invalid",
     "not_found": "not_found",
     "quota_exceeded": "quota_exceeded",
-    "attempt_limit": "quota_exceeded",
+    # All 16 upload attempts have failed: no retry can succeed, so the client
+    # reannounces rather than waits (Laurence, 2026-10-01).
+    "attempt_limit": "candidate_expired",
     "idempotency_conflict": "idempotency_conflict",
     "state_conflict": "idempotency_conflict",
     "lease_stale": "idempotency_conflict",

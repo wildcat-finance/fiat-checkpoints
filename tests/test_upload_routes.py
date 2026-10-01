@@ -5,10 +5,12 @@ import uuid
 
 from fiat_checkpoints.auth.refusals import PUBLIC_STATUS
 from fiat_checkpoints.domain.coordination import QuotaPolicy
-from fiat_checkpoints.upload.capability import IssuedCapability
+from fiat_checkpoints.persistence.transfer import object_key
+from fiat_checkpoints.upload.capability import IssuedCapability, capability_sha256
 from tests.auth_support import build, request, session_headers
 from tests.persistence_support import T0, recorded_events
-from tests.upload_support import ACTOR, CHUNK, OTHER_ACTOR, UploadCase, body_steps, payload, sha256
+from tests.upload_support import (ACTOR, CHUNK, OTHER_ACTOR, SETTINGS, UploadCase, body_steps, disconnect, payload,
+                                  sha256)
 
 
 class RouteCase(UploadCase):
@@ -134,3 +136,51 @@ class CompleteRouteTests(RouteCase):
         self.assert_code(self.complete(candidate, claim, session=other), "not_found")
         accepted = self.complete(candidate, claim, "application/json; charset=utf-8")
         self.assert_code(accepted, "upload_integrity")
+
+
+class SpentAttemptRouteTests(RouteCase):
+    """A new attempt and the status say the same once all 16 attempts have failed (Laurence, 2026-10-01)."""
+
+    def status(self, candidate):
+        response = self.call("GET", f"/v1/candidates/{candidate}")
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        return body["state"], body["code"], "retry_after_seconds" in body
+
+    def attempts_until(self, candidate, data, failed):
+        """Ask for attempts and fail `failed` of their streams; return the last capability."""
+        for number in range(16):
+            created = self.attempt(candidate, f"attempt-key-{number:04d}")
+            self.assertEqual((created.status_code, created.json()["upload"]["attempt"]), (201, number + 1),
+                             created.text)
+            upload = created.json()["upload"]
+            capability = IssuedCapability(upload["capability"], candidate, upload["attempt"], None, upload["length"],
+                                          upload["sha256"], False)
+            if number >= failed:
+                return capability
+            self.assertEqual(self.put(candidate, capability, body_steps(data)[:1] + [disconnect()]).status, 422)
+            if number == 14:
+                # One attempt left: the status and a new attempt keep their present answers.
+                self.assertEqual(self.status(candidate), ("uploading", None, False))
+        return None
+
+    def test_a_spent_candidate_answers_expired_and_its_status_says_so(self):
+        data = payload(2 * CHUNK)
+        candidate = self.announce(data)
+        self.endorse(candidate, data, lifetime=300)
+        self.attempts_until(candidate, data, 16)
+        spent = self.attempt(candidate, "attempt-key-0016")
+        self.assert_code(spent, "candidate_expired")
+        self.assertEqual(self.status(candidate), ("uploading", "candidate_expired", False))
+
+    def test_a_last_stream_that_died_makes_the_status_expired_once_its_lease_ends(self):
+        data = payload(2 * CHUNK)
+        candidate = self.announce(data)
+        self.endorse(candidate, data, lifetime=300)
+        last = self.attempts_until(candidate, data, 15)
+        self.transfers.start(capability_sha256(last.value), object_key(candidate, 16, "c" * 32),
+                             SETTINGS.environment_id, self.clock_now)
+        self.advance(1799)
+        self.assertEqual(self.status(candidate), ("uploading", None, False))
+        self.advance(1)
+        self.assertEqual(self.status(candidate), ("uploading", "candidate_expired", False))

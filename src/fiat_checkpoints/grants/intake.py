@@ -18,6 +18,7 @@ from fiat_checkpoints.domain.coordination import GIB, AnnounceRequest, candidate
 from fiat_checkpoints.domain.identities import CheckpointIdentities, IdentityMismatch
 from fiat_checkpoints.grants.endorsement import EndorsementStore, check_binding
 from fiat_checkpoints.grants.projection import MAX_TRUST_ENVELOPE_BYTES, signature_refusal
+from fiat_checkpoints.persistence.transfer import Transfers
 from fiat_checkpoints.records.refusals import RecordRefusal
 
 
@@ -145,7 +146,12 @@ class Intake:
         # A candidate the service is retrying after a dependency failure gives
         # the same bounded wait as a 503 refusal (sections 13 and 16).
         retry = RETRY_AFTER_SECONDS[503] if view.retry_reason is not None and view.terminal_code is None else None
-        return Status(view.candidate_id, view.state.value, view.terminal_code, retry)
+        code = view.terminal_code
+        # One whose 16 upload attempts have all failed can only be reannounced,
+        # as a new attempt's 410 says; it stays uploading until its deadline.
+        if code is None and Transfers.from_coordinator(self.coordinator).attempts_spent(binding.candidate_id, now):
+            code = "candidate_expired"
+        return Status(view.candidate_id, view.state.value, code, retry)
 
     def prove_enrollment(self, actor_id, repository_id, run_id, body, now):
         """Record the authenticated actor's proof of possession for its own operator challenge.

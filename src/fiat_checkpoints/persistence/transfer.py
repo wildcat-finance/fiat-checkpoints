@@ -26,7 +26,7 @@ import uuid
 from fiat_checkpoints.domain.coordination import (
     CANDIDATE_LIFETIME, CoordinationRefusal, Lease, RunScope, candidate_uuid, digest, positive_int, require_now,
 )
-from fiat_checkpoints.persistence.coordinator import Coordinator
+from fiat_checkpoints.persistence.coordinator import MAX_UPLOAD_ATTEMPTS, Coordinator
 
 
 LOGGER = logging.getLogger("fiat_checkpoints")
@@ -449,6 +449,28 @@ class Transfers(Coordinator):
             return row["state"], current
 
         return self._run(work)
+
+    def attempts_spent(self, candidate_id, now):
+        """Whether an unsealed uploading candidate can never open another attempt.
+
+        True once all 16 attempts exist and none is still usable: no open
+        attempt whose stream has not started, and none whose stream lease
+        lives. Its quota stays reserved until the deadline; a new attempt
+        refuses as `attempt_limit`.
+        """
+        candidate_id = candidate_uuid(candidate_id)
+        now = require_now(now)
+
+        def work(connection, _events):
+            return connection.execute(
+                "SELECT c.state = 'uploading' AND c.sealed_attempt IS NULL AND (SELECT count(*) FROM upload_attempts "
+                "WHERE candidate_id = c.candidate_id) >= %s AND NOT EXISTS (SELECT 1 FROM upload_attempts "
+                "WHERE candidate_id = c.candidate_id AND state = 'open' AND (stream_started_at IS NULL "
+                "OR lease_expires_at > %s)) AS spent FROM candidates c WHERE c.candidate_id = %s",
+                (MAX_UPLOAD_ATTEMPTS, now, candidate_id)).fetchone()
+
+        row = self._run(work)
+        return row is not None and row["spent"] is True
 
     def sealed_object(self, candidate_id, attempt_number):
         """The recorded quarantine key, size and digest of a sealed attempt, for the staging broker."""
