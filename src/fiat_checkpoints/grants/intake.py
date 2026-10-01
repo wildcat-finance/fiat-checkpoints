@@ -147,8 +147,9 @@ class Intake:
         # the same bounded wait as a 503 refusal (sections 13 and 16).
         retry = RETRY_AFTER_SECONDS[503] if view.retry_reason is not None and view.terminal_code is None else None
         code = view.terminal_code
-        # One whose 16 upload attempts have all failed can only be reannounced,
-        # as a new attempt's 410 says; it stays uploading until its deadline.
+        # A candidate whose 16 upload attempts have all failed can only be
+        # reannounced, as a new attempt's 410 says; it stays uploading until its
+        # deadline.
         if code is None and Transfers.from_coordinator(self.coordinator).attempts_spent(binding.candidate_id, now):
             code = "candidate_expired"
         return Status(view.candidate_id, view.state.value, code, retry)

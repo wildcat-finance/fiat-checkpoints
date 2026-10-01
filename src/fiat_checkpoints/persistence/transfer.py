@@ -12,8 +12,9 @@ Every call locks the candidate row first, then its attempt, then the
 attempt's capability, the candidate's endorsements and the quarantine record,
 as every other coordinator call locks the candidate before what belongs to it.
 The sweeper's record updates lock quarantine and capability rows alone, never
-a candidate or an attempt, and never a row a seal can be holding. A refusal is a `CoordinationRefusal` with a fixed code and nothing else.
-See adr/seal-uploads-in-bounded-quarantine.
+a candidate or an attempt, and never a row a seal can be holding. A refusal is
+a `CoordinationRefusal` with a fixed code and nothing else. See
+adr/seal-uploads-in-bounded-quarantine.
 """
 
 from dataclasses import dataclass
