@@ -54,6 +54,14 @@ jobs:
           --volume fiat-checkpoints-postgres-socket:/run/fiat-postgres
           --volume "$PWD:$PWD" --workdir "$PWD" fiat-checkpoints-test:ci
           python3 scripts/check.py --group auth,endorsement
+      - name: Check upload and quarantine in the test image
+        run: >-
+          docker run --rm --platform linux/amd64 --network none
+          --user "$(id -u):$(id -g)" --env HOME=/tmp
+          --env FIAT_TEST_POSTGRES=/run/fiat-postgres
+          --volume fiat-checkpoints-postgres-socket:/run/fiat-postgres
+          --volume "$PWD:$PWD" --workdir "$PWD" fiat-checkpoints-test:ci
+          python3 scripts/check.py --group upload,quarantine
       - name: Stop the PostgreSQL test server
         if: always()
         run: scripts/test-postgres.sh stop

@@ -254,6 +254,7 @@ class Coordinator:
         expired = connection.execute(
             "SELECT candidate_id FROM upload_attempts WHERE state = 'open' AND lease_expires_at <= %s "
             "ORDER BY lease_expires_at LIMIT %s", (now, MAX_STREAM_RECLAIMS)).fetchall()
+        reclaimed = 0
         for item in expired:
             row = connection.execute("SELECT * FROM candidates WHERE candidate_id = %s FOR UPDATE SKIP LOCKED",
                                      (item["candidate_id"],)).fetchone()
@@ -266,6 +267,8 @@ class Coordinator:
                 self._release(connection, events, row, now, kinds=("stream",), attempt=attempt["attempt_number"])
                 events.add("lease-expired", logging.WARNING, candidate=str(row["candidate_id"]), kind="upload",
                            attempt=attempt["attempt_number"], fence=attempt["fence"])
+                reclaimed += 1
+        return reclaimed
 
     def _reserve_stream(self, connection, events, actor_id):
         for scope, key, limit in (("global", 0, self.quotas.streams_global),
@@ -421,38 +424,48 @@ class Coordinator:
                 self._release(connection, events, row, now, kinds=("stream",), attempt=current["attempt_number"])
                 events.add("lease-expired", logging.WARNING, candidate=str(candidate_id), kind="upload",
                            attempt=current["attempt_number"], fence=current["fence"])
-            count = connection.execute("SELECT count(*) AS n FROM upload_attempts WHERE candidate_id = %s",
-                                       (candidate_id,)).fetchone()["n"]
-            if count >= MAX_UPLOAD_ATTEMPTS:
-                raise CoordinationRefusal("attempt_limit")
-            reserved = connection.execute(
-                "SELECT 1 FROM reservations WHERE candidate_id = %s AND kind = 'candidate' "
-                "AND released_at IS NULL", (candidate_id,)).fetchone()
-            if reserved is None:
-                raise CoordinationRefusal("state_conflict")
-            self._reclaim_expired_streams(connection, events, now)
-            refusal = self._reserve_stream(connection, events, row["actor_id"])
-            if refusal is not None:
-                raise refusal
-            attempt, fence = count + 1, row["fence"] + 1
-            expires_at = now + timedelta(seconds=self.leases.upload_seconds)
-            connection.execute(
-                "INSERT INTO upload_attempts (candidate_id, attempt_number, fence, state, lease_expires_at, "
-                "created_at, updated_at) VALUES (%s, %s, %s, 'open', %s, %s, %s)",
-                (candidate_id, attempt, fence, expires_at, now, now))
-            connection.execute(
-                "INSERT INTO reservations (candidate_id, kind, attempt_number, reserved_bytes, created_at) "
-                "VALUES (%s, 'stream', %s, 0, %s)", (candidate_id, attempt, now))
-            if row["state"] == "announced":
-                evidence = UPLOAD_CALLER_EVIDENCE | {Evidence.QUOTA_RESERVED, Evidence.EXACT_SIZE_AND_DIGEST}
-                self._transition(connection, events, row, State.UPLOADING, evidence, now,
-                                 "upload-started", fence=fence)
-            else:
-                self._update(connection, row, now, fence=fence)
-            events.add("lease-granted", candidate=str(candidate_id), kind="upload", attempt=attempt, fence=fence)
-            return Lease(candidate_id, "upload", attempt, fence, expires_at)
+            return self._open_attempt(connection, events, row, now + timedelta(seconds=self.leases.upload_seconds),
+                                      now)
 
         return self._run(work)
+
+    def _open_attempt(self, connection, events, row, expires_at, now):
+        """Open the next fenced upload attempt of a locked candidate with no open attempt.
+
+        The candidate's quota reservation must still be held. Expired leases of
+        other candidates give their streams back before this one reserves a
+        stream; the lease lives until `expires_at`.
+        """
+        candidate_id = row["candidate_id"]
+        count = connection.execute("SELECT count(*) AS n FROM upload_attempts WHERE candidate_id = %s",
+                                   (candidate_id,)).fetchone()["n"]
+        if count >= MAX_UPLOAD_ATTEMPTS:
+            raise CoordinationRefusal("attempt_limit")
+        reserved = connection.execute(
+            "SELECT 1 FROM reservations WHERE candidate_id = %s AND kind = 'candidate' "
+            "AND released_at IS NULL", (candidate_id,)).fetchone()
+        if reserved is None:
+            raise CoordinationRefusal("state_conflict")
+        self._reclaim_expired_streams(connection, events, now)
+        refusal = self._reserve_stream(connection, events, row["actor_id"])
+        if refusal is not None:
+            raise refusal
+        attempt, fence = count + 1, row["fence"] + 1
+        connection.execute(
+            "INSERT INTO upload_attempts (candidate_id, attempt_number, fence, state, lease_expires_at, "
+            "created_at, updated_at) VALUES (%s, %s, %s, 'open', %s, %s, %s)",
+            (candidate_id, attempt, fence, expires_at, now, now))
+        connection.execute(
+            "INSERT INTO reservations (candidate_id, kind, attempt_number, reserved_bytes, created_at) "
+            "VALUES (%s, 'stream', %s, 0, %s)", (candidate_id, attempt, now))
+        if row["state"] == "announced":
+            evidence = UPLOAD_CALLER_EVIDENCE | {Evidence.QUOTA_RESERVED, Evidence.EXACT_SIZE_AND_DIGEST}
+            self._transition(connection, events, row, State.UPLOADING, evidence, now,
+                             "upload-started", fence=fence)
+        else:
+            self._update(connection, row, now, fence=fence)
+        events.add("lease-granted", candidate=str(candidate_id), kind="upload", attempt=attempt, fence=fence)
+        return Lease(candidate_id, "upload", attempt, fence, expires_at)
 
     def seal_upload(self, lease, sealed_size, sealed_sha256, caller_evidence, now):
         """Commit the exact attempt the current lease holder streamed.
@@ -470,41 +483,55 @@ class Coordinator:
         now = require_now(now)
 
         def work(connection, events):
-            row = self._lock_candidate(connection, lease.candidate_id)
-            attempt = connection.execute(
-                "SELECT * FROM upload_attempts WHERE candidate_id = %s AND attempt_number = %s FOR UPDATE",
-                (lease.candidate_id, lease.attempt_number)).fetchone()
-            if (row is not None and attempt is not None and attempt["state"] == "sealed"
-                    and attempt["fence"] == lease.fence and row["sealed_attempt"] == lease.attempt_number
-                    and attempt["sealed_sha256"] == sealed_sha256 and attempt["sealed_size"] == sealed_size):
-                return lease.attempt_number
-            if (row is None or attempt is None or attempt["state"] != "open" or attempt["fence"] != lease.fence
-                    or row["fence"] != lease.fence or attempt["lease_expires_at"] <= now):
-                events.add("lease-stale-refused", logging.WARNING, True, candidate=str(lease.candidate_id),
-                           kind="upload", fence=lease.fence)
-                return CoordinationRefusal("lease_stale")
-            if now >= row["expires_at"]:
-                return CoordinationRefusal("candidate_expired")
-            if sealed_size != row["declared_size"] or sealed_sha256 != row["archive_sha256"]:
-                connection.execute(
-                    "UPDATE upload_attempts SET state = 'failed', updated_at = %s "
-                    "WHERE candidate_id = %s AND attempt_number = %s",
-                    (now, lease.candidate_id, lease.attempt_number))
-                self._release(connection, events, row, now, kinds=("stream",), attempt=lease.attempt_number)
-                events.add("upload-integrity-refused", logging.WARNING, candidate=str(lease.candidate_id),
-                           attempt=lease.attempt_number, fence=lease.fence)
-                return CoordinationRefusal("upload_integrity")
-            connection.execute(
-                "UPDATE upload_attempts SET state = 'sealed', sealed_size = %s, sealed_sha256 = %s, updated_at = %s "
-                "WHERE candidate_id = %s AND attempt_number = %s",
-                (sealed_size, sealed_sha256, now, lease.candidate_id, lease.attempt_number))
-            self._release(connection, events, row, now, kinds=("stream",), attempt=lease.attempt_number)
-            self._transition(connection, events, row, State.QUARANTINED, SEAL_CALLER_EVIDENCE, now,
-                             "upload-sealed", sealed_attempt=lease.attempt_number, retry_reason=None)
-            self._enqueue(connection, events, "validate-candidate", lease.candidate_id, now)
-            return lease.attempt_number
+            row, checked = self._seal_check(connection, events, lease, sealed_size, sealed_sha256, now)
+            if checked is not None:
+                return checked
+            return self._seal_commit(connection, events, row, lease, sealed_size, sealed_sha256, now)
 
         return self._run(work)
+
+    def _seal_check(self, connection, events, lease, sealed_size, sealed_sha256, now):
+        """Lock the candidate, then the attempt; return the row and a replay, a refusal or None to seal.
+
+        A size or digest other than the declared ones fails the attempt and
+        releases its stream, which commits before the refusal is raised.
+        """
+        row = self._lock_candidate(connection, lease.candidate_id)
+        attempt = connection.execute(
+            "SELECT * FROM upload_attempts WHERE candidate_id = %s AND attempt_number = %s FOR UPDATE",
+            (lease.candidate_id, lease.attempt_number)).fetchone()
+        if (row is not None and attempt is not None and attempt["state"] == "sealed"
+                and attempt["fence"] == lease.fence and row["sealed_attempt"] == lease.attempt_number
+                and attempt["sealed_sha256"] == sealed_sha256 and attempt["sealed_size"] == sealed_size):
+            return row, lease.attempt_number
+        if (row is None or attempt is None or attempt["state"] != "open" or attempt["fence"] != lease.fence
+                or row["fence"] != lease.fence or attempt["lease_expires_at"] <= now):
+            events.add("lease-stale-refused", logging.WARNING, True, candidate=str(lease.candidate_id),
+                       kind="upload", fence=lease.fence)
+            return row, CoordinationRefusal("lease_stale")
+        if now >= row["expires_at"]:
+            return row, CoordinationRefusal("candidate_expired")
+        if sealed_size != row["declared_size"] or sealed_sha256 != row["archive_sha256"]:
+            connection.execute(
+                "UPDATE upload_attempts SET state = 'failed', updated_at = %s "
+                "WHERE candidate_id = %s AND attempt_number = %s",
+                (now, lease.candidate_id, lease.attempt_number))
+            self._release(connection, events, row, now, kinds=("stream",), attempt=lease.attempt_number)
+            events.add("upload-integrity-refused", logging.WARNING, candidate=str(lease.candidate_id),
+                       attempt=lease.attempt_number, fence=lease.fence)
+            return row, CoordinationRefusal("upload_integrity")
+        return row, None
+
+    def _seal_commit(self, connection, events, row, lease, sealed_size, sealed_sha256, now):
+        connection.execute(
+            "UPDATE upload_attempts SET state = 'sealed', sealed_size = %s, sealed_sha256 = %s, updated_at = %s "
+            "WHERE candidate_id = %s AND attempt_number = %s",
+            (sealed_size, sealed_sha256, now, lease.candidate_id, lease.attempt_number))
+        self._release(connection, events, row, now, kinds=("stream",), attempt=lease.attempt_number)
+        self._transition(connection, events, row, State.QUARANTINED, SEAL_CALLER_EVIDENCE, now,
+                         "upload-sealed", sealed_attempt=lease.attempt_number, retry_reason=None)
+        self._enqueue(connection, events, "validate-candidate", lease.candidate_id, now)
+        return lease.attempt_number
 
     # Outbox -----------------------------------------------------------------
 

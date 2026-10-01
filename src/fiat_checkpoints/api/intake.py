@@ -1,4 +1,4 @@
-"""Contributor login, sessions, announce, endorsement and proof of possession over HTTP.
+"""Contributor login, sessions, announce, endorsement, upload capabilities and proof of possession over HTTP.
 
 Each route reads a bounded body itself, authenticates by exactly one
 credential and answers with a fixed code from specification section 16. A
@@ -7,7 +7,10 @@ SameSite=Strict, and every unsafe browser request also carries the CSRF token
 derived from it. A CLI access token arrives only as `Authorization: Bearer`.
 A provider token, a login name and a pasted personal token are never
 credentials here. Nothing a caller sends and no library or database message
-appears in a response or an event. See adr/bind-uploads-to-enrolled-keys.
+appears in a response or an event. A recorded endorsement answers with an
+upload capability for the gateway, shown once, unless the candidate's upload
+is already sealed. See adr/bind-uploads-to-enrolled-keys and
+adr/seal-uploads-in-bounded-quarantine.
 """
 
 from dataclasses import dataclass
@@ -32,10 +35,12 @@ from fiat_checkpoints.auth.refusals import PROTOCOL_CODE_PUBLIC, AuthRefusal, pu
 from fiat_checkpoints.auth.sessions import LOGIN_STATE_LIFETIME, SessionStore
 from fiat_checkpoints.auth.tokens import csrf_matches, csrf_token, pkce_challenge, pkce_verifier, well_formed
 from fiat_checkpoints.config import Settings
-from fiat_checkpoints.domain.coordination import require_now
+from fiat_checkpoints.domain.coordination import CoordinationRefusal, idempotency_key, require_now
 from fiat_checkpoints.grants.intake import Intake
 from fiat_checkpoints.grants.projection import Projections
+from fiat_checkpoints.persistence.transfer import Completed
 from fiat_checkpoints.records.trees import DEFAULT_TREES, REPOSITORY
+from fiat_checkpoints.upload.issuer import UploadIssuer
 
 
 LOGGER = logging.getLogger("fiat_checkpoints")
@@ -129,6 +134,24 @@ def _instant(value):
     return value.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _upload(issued):
+    """The capability part of a response, or None once the candidate's upload is sealed."""
+    if isinstance(issued, Completed):
+        return None
+    return {"capability": issued.value, "attempt": issued.attempt_number, "expires_at": _instant(issued.expires_at),
+            "length": issued.declared_size, "sha256": issued.archive_sha256}
+
+
+def _json_type(request):
+    """Exactly one `application/json` Content-Type, with at most a UTF-8 charset."""
+    values = request.headers.getlist("content-type")
+    if len(values) != 1:
+        raise AuthRefusal("request_invalid", "content-type")
+    media, _, parameters = values[0].partition(";")
+    if media.strip().lower() != "application/json" or parameters.strip().lower() not in ("", "charset=utf-8"):
+        raise AuthRefusal("request_invalid", "content-type")
+
+
 def _cookie(response, name, value, seconds, same_site):
     response.set_cookie(name, value, max_age=max(0, int(seconds)), path="/", secure=True, httponly=True,
                         samesite=same_site)
@@ -153,6 +176,10 @@ def create_intake_app(settings, services, root=REPOSITORY, trees=DEFAULT_TREES):
     if services.projections.environment != "test":
         raise StartupRefusal(("configuration-local-identity",))
 
+    try:
+        uploads = UploadIssuer(services.intake, environment=settings.environment_id)
+    except (AttributeError, CoordinationRefusal):
+        raise StartupRefusal(("scaffold-only",)) from None
     app = FastAPI(openapi_url=None, docs_url=None, redoc_url=None, redirect_slashes=False)
 
     def refusal_response(request, error):
@@ -332,9 +359,45 @@ def create_intake_app(settings, services, root=REPOSITORY, trees=DEFAULT_TREES):
         envelope = await read_body(request)
         done = await run_in_threadpool(services.intake.endorse, actor.actor_id,
                                        request.path_params["candidate_id"], envelope, now)
+        # The endorsement stays recorded if no capability can be issued now; the
+        # same request, replayed, returns it and asks for a capability again.
+        issued = await run_in_threadpool(uploads.issue, actor.actor_id, done.candidate_id, now)
         return reply(request, 200, {"candidate_id": str(done.candidate_id),
                                     "endorsement_sha256": done.envelope_sha256,
-                                    "expires_at": _instant(done.expires_at), "replayed": done.replayed})
+                                    "expires_at": _instant(done.expires_at), "replayed": done.replayed,
+                                    "state": issued.state if isinstance(issued, Completed) else "uploading",
+                                    "upload": _upload(issued)})
+
+    @route("POST", "/v1/candidates/{candidate_id}/upload-attempts")
+    async def upload_attempt(request, now):
+        """A capability for a new attempt after a failed or expired one, or the sealed result."""
+        actor, _secret = await authenticate(request, now, unsafe=True)
+        keys = request.headers.getlist("idempotency-key")
+        try:
+            if len(keys) != 1:
+                raise CoordinationRefusal("request_invalid")
+            idempotency_key(keys[0])
+        except CoordinationRefusal:
+            raise AuthRefusal("request_invalid", "idempotency-key") from None
+        await empty_body(request)
+        issued = await run_in_threadpool(uploads.issue, actor.actor_id, request.path_params["candidate_id"], now)
+        if isinstance(issued, Completed):
+            return reply(request, 200, {"candidate_id": str(issued.candidate_id), "state": issued.state,
+                                        "upload": None})
+        return reply(request, 200 if issued.renewed else 201, {"candidate_id": str(issued.candidate_id),
+                                                               "state": "uploading", "upload": _upload(issued)})
+
+    @route("POST", "/v1/candidates/{candidate_id}/complete")
+    async def complete(request, now):
+        """The sealed result, only when the claim names exactly what the gateway sealed."""
+        actor, _secret = await authenticate(request, now, unsafe=True)
+        _json_type(request)
+        body = json_body(await read_body(request))
+        done = await run_in_threadpool(uploads.complete, actor.actor_id, request.path_params["candidate_id"],
+                                       body, now)
+        return reply(request, 200, {"candidate_id": str(done.candidate_id), "state": done.state,
+                                    "attempt": done.attempt_number, "length": done.sealed_size,
+                                    "sha256": done.sealed_sha256})
 
     @route("GET", "/v1/candidates/{candidate_id}")
     async def status(request, now):

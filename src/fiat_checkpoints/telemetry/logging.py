@@ -10,7 +10,7 @@ import logging
 FIELDS = (
     "event", "request_id", "route", "status", "codes", "duration_us",
     "candidate", "attempt", "job", "kind", "fence", "from_state", "to_state",
-    "code", "scope", "age_ms", "delay_ms", "count", "reason", "protocol_code",
+    "code", "scope", "age_ms", "delay_ms", "count", "reason", "protocol_code", "bytes",
 )
 
 
