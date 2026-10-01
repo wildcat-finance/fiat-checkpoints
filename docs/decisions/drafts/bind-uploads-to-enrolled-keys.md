@@ -125,6 +125,7 @@ challenge and a replay of an earlier endorsement refuse.
 | Candidate, nonce, run, parent, time or signature differs; grant not current; challenge spent or earlier; endorsement earlier or expired | 422 `endorsement_invalid` |
 | Signing key has no live enrollment for the actor | 422 `signer_not_enrolled` |
 | Another actor's candidate, or no current grant | 404 `not_found` |
+| A new endorsement while an upload stream is live; nothing is recorded (adr/seal-uploads-in-bounded-quarantine) | 409 `upload_in_progress` |
 | Trust head moved before the commit, or database outage | 503 `policy_unavailable` |
 | The candidate's 288th challenge is spent | 429 `quota_exceeded` |
 

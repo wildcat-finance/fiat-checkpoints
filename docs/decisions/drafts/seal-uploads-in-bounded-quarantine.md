@@ -56,7 +56,17 @@ the lock-held checks repeat them in the same transaction. The capability is
 bound to its actor through that record: the gateway checks that actor's bound
 endorsement and grant, and the capability can seal only the bytes that actor
 endorsed. If no capability can be issued, the endorsement stays recorded and
-the response is the refusal; the same request replayed issues one.
+the response is the refusal; the same request replayed issues one. The one
+exception is a live stream: while a started stream's lease lives, a new
+endorsement refuses 409 `upload_in_progress` and is not recorded, so the
+stream's endorsement stays the bound one. The contributor endorses again once
+the stream ends or its lease expires (Laurence, 2026-10-01).
+
+| Issue refusal | Code |
+| --- | --- |
+| A new endorsement while a stream is live | 409 `upload_in_progress`, nothing recorded |
+| Issue while a stream is live | 409 `upload_in_progress` |
+| The actor's or the service's streams are all reserved, or an attempt's 1,024 issues are spent | 429 `quota_exceeded`, `Retry-After: 60` |
 
 | Lifetime | Value | Where it is enforced |
 | --- | --- | --- |
@@ -71,14 +81,15 @@ Issuing again while the attempt's stream has not started replaces the stored
 hash of the same attempt, at most 1,024 times, so a replayed request opens no
 second attempt and holds no second stream. The earlier value stops working. A
 started stream makes issue `upload_in_progress`; a sealed attempt answers with
-its recorded result and no capability. A newer endorsement supersedes the
-capability: the stream refuses to start, and the seal refuses if the
-endorsement changed during the transfer. The endorsement may expire during the
-stream, because every endorsement of one candidate binds the same identities,
-length and parent. Issue #2 binds acceptance through `bound` with its own
-`until`. The idempotency key that section 13 asks for on `upload-attempts` is
-checked for shape only: the route is idempotent by candidate state, so a second
-key reaches the same attempt.
+its recorded result and no capability. A newer endorsement recorded before the
+stream starts supersedes the capability, and the stream refuses to start; once
+a stream has started no newer endorsement can be recorded, and the seal still
+refuses if the latest endorsement is not the capability's. The endorsement may
+expire during the stream, because every endorsement of one candidate binds the
+same identities, length and parent. Issue #2 binds acceptance through `bound`
+with its own `until`. The idempotency key that section 13 asks for on
+`upload-attempts` is checked for shape only: the route is idempotent by
+candidate state, so a second key reaches the same attempt.
 
 ### Framing and staging
 

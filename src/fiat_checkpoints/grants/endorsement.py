@@ -14,8 +14,10 @@ endorsement has spent the candidate's challenge, a replayed announce issues
 the next one. The latest recorded endorsement is the bound one while it is
 unexpired, and an earlier one is never bound again. An exact replay of the
 bound envelope returns the recorded result; a second envelope for a spent
-challenge, an older challenge or an older endorsement refuses. See
-adr/bind-uploads-to-enrolled-keys.
+challenge, an older challenge or an older endorsement refuses. While an upload
+stream holds the candidate, a new endorsement refuses as `upload_in_progress`
+and is not recorded, so the stream keeps the endorsement it started under. See
+adr/bind-uploads-to-enrolled-keys and adr/seal-uploads-in-bounded-quarantine.
 """
 
 from dataclasses import dataclass, replace
@@ -270,7 +272,9 @@ class EndorsementStore:
         The candidate row is locked first, then its challenges and
         endorsements, then the run row in share mode, which an ingestion holds
         exclusively while it appends, so the grant just checked is still the
-        current one.
+        current one. A stream starts and ends only under the same candidate
+        lock, so a live stream seen here stays live until this commits, and a
+        stream that starts after it sees this endorsement as the latest.
         """
         now = require_now(now)
         count, tail = head
@@ -306,6 +310,14 @@ class EndorsementStore:
                 return AuthRefusal("endorsement_invalid", "challenge-superseded")
             if row["state"] not in ENDORSABLE:
                 return AuthRefusal("idempotency_conflict", "candidate-state")
+            # A live stream seals under the endorsement it started with; a new
+            # one waits until that stream ends or its lease expires.
+            streaming = connection.execute(
+                "SELECT 1 FROM upload_attempts WHERE candidate_id = %s AND state = 'open' "
+                "AND stream_started_at IS NOT NULL AND lease_expires_at > %s",
+                (binding.candidate_id, now)).fetchone()
+            if streaming is not None:
+                return AuthRefusal("upload_in_progress", "stream-active")
             run = connection.execute("SELECT run_key FROM run_registrations WHERE run_key = %s FOR SHARE",
                                      (row["run_key"],)).fetchone()
             observed = connection.execute(

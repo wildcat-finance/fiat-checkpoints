@@ -3,18 +3,22 @@
 import asyncio
 from datetime import timedelta
 import json
+import secrets
+from types import SimpleNamespace
 
 from fiat_checkpoints.auth.refusals import AuthRefusal
 from fiat_checkpoints.domain.coordination import CoordinationRefusal, QuotaPolicy
-from fiat_checkpoints.persistence.transfer import Completed
+from fiat_checkpoints.domain.identities import CheckpointIdentities
+from fiat_checkpoints.grants.endorsement import Terms
+from fiat_checkpoints.persistence.transfer import Completed, object_key
 from fiat_checkpoints.upload.capability import capability_sha256, presented
 from fiat_checkpoints.upload.issuer import UploadIssuer
 from tests.persistence_support import T0, recorded_events, run_threads
 from unittest import mock
 
 from fiat_checkpoints.persistence import transfer as transfer_module
-from tests.upload_support import (ACTOR, CHUNK, OTHER_ACTOR, SCOPE, SETTINGS, UploadCase, body_steps, effect,
-                                  exchange, pause, payload, revoked, run)
+from tests.upload_support import (ACTOR, CHUNK, OTHER_ACTOR, PARENT, SCOPE, SETTINGS, UploadCase, body_steps, effect,
+                                  exchange, pause, payload, revoked, run, sha256)
 
 
 class IssueTests(UploadCase):
@@ -260,3 +264,124 @@ class EventTests(UploadCase):
             self.assertLessEqual(set(event), {"event", "request_id", "route", "status", "duration_us", "code",
                                               "reason", "candidate", "attempt", "fence", "kind", "count", "scope",
                                               "from_state", "to_state", "age_ms", "job", "bytes"})
+
+
+class LiveStreamEndorsementTests(UploadCase):
+    """A new endorsement waits while a stream holds its candidate (Laurence, 2026-10-01).
+
+    Endorsements go through `EndorsementStore.record`, as the endorsement route
+    records them after the library has verified the envelope.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.head = None
+
+    def recorded(self, candidate, data, label, actor=ACTOR, nonce=None, lifetime=120):
+        """Bind the candidate's current challenge and record one synthetic verified endorsement for it."""
+        now = self.clock_now
+        if self.head is None:
+            # `record` compares the stored trust head it was given; nothing here verifies the row.
+            policy = b"synthetic-policy"
+            run_key = self.scalar("SELECT run_key FROM candidates WHERE candidate_id = %s", (candidate,))
+            connection = self.database.connect()
+            try:
+                connection.execute("INSERT INTO trust_records (run_key, sequence, record_type, envelope, "
+                                   "envelope_sha256, ingested_at) VALUES (%s, 1, 'authority-policy', %s, %s, %s)",
+                                   (run_key, policy, sha256(policy), now))
+            finally:
+                connection.close()
+            self.head = (1, sha256(policy))
+        self.endorsements.bind(candidate, CheckpointIdentities("1" * 64, "2" * 64, sha256(data)), PARENT, now)
+        binding = self.endorsements.binding(actor, candidate)
+        if nonce is not None:
+            binding = self.endorsements.named(binding, nonce)
+        envelope = ("synthetic-endorsement-" + label).encode()
+        verified = SimpleNamespace(envelope=envelope, envelope_sha256=sha256(envelope), key_fingerprint="f" * 64)
+        terms = Terms("7" * 64, "8" * 64, {"type": "run-grant", "sha256": "6" * 64}, now,
+                      now + timedelta(seconds=lifetime))
+        return self.endorsements.record(binding, verified, terms, self.head, now)
+
+    def first(self, data, label="one", actor=ACTOR):
+        """An announced candidate with one recorded endorsement and a capability; returns both and the nonce."""
+        candidate = self.announce(data, label, actor)
+        nonce = self.endorsements.binding(actor, candidate).challenge.nonce
+        self.recorded(candidate, data, label, actor)
+        return candidate, self.issuer.issue(actor, candidate, self.clock_now), nonce
+
+    def stored(self, candidate):
+        return self.scalar("SELECT count(*) FROM upload_endorsements WHERE candidate_id = %s", (candidate,))
+
+    def test_a_new_endorsement_during_a_live_stream_is_refused_and_not_recorded(self):
+        data = payload(4 * CHUNK)
+        candidate, capability, nonce = self.first(data)
+        seen = []
+
+        def endorse_again():
+            for label, named in (("two", None), ("one", nonce)):
+                try:
+                    done = self.recorded(candidate, data, label, nonce=named)
+                    seen.append(("replayed" if done.replayed else "recorded", label))
+                except AuthRefusal as refusal:
+                    seen.append((refusal.status, refusal.code, label))
+
+        steps = body_steps(data)
+        steps.insert(1, effect(endorse_again))
+        response = self.put(candidate, capability, steps)
+        # The new envelope waits; an exact replay of the bound one still answers.
+        self.assertEqual(seen, [(409, "upload_in_progress", "two"), ("replayed", "one")])
+        self.assertEqual(response.status, 202, response.text)
+        self.assertEqual(self.stored(candidate), 1)
+        self.assertEqual(self.scalar("SELECT count(*) FROM audit_events WHERE event = 'endorsement-verified'"), 1)
+        self.assertEqual(self.endorsements.bound(ACTOR, candidate, self.clock_now).sequence, 1)
+        # Once the stream has sealed, the contributor endorses again, as acceptance may need.
+        self.assertFalse(self.recorded(candidate, data, "two").replayed)
+        self.assertEqual(self.endorsements.bound(ACTOR, candidate, self.clock_now).sequence, 2)
+
+    def test_an_endorsement_is_possible_again_once_a_dead_stream_lease_expires(self):
+        data = payload(2 * CHUNK)
+        candidate, capability, _nonce = self.first(data)
+        self.transfers.start(capability_sha256(capability.value), object_key(candidate, 1, "a" * 32),
+                             SETTINGS.environment_id, self.clock_now)
+        # The gateway that started this stream stopped without ending it.
+        self.advance(1799)
+        with self.assertRaises(AuthRefusal) as caught:
+            self.recorded(candidate, data, "two")
+        self.assertEqual((caught.exception.code, caught.exception.reason), ("upload_in_progress", "stream-active"))
+        self.assertEqual(self.stored(candidate), 1)
+        self.advance(1)
+        self.assertFalse(self.recorded(candidate, data, "two", lifetime=300).replayed)
+        retry = self.issuer.issue(ACTOR, candidate, self.clock_now)
+        self.assertEqual((retry.attempt_number, self.attempts(candidate)), (2, [(1, "abandoned"), (2, "open")]))
+        self.assertEqual(self.upload(candidate, retry, data).status, 202)
+
+    def test_an_endorsement_before_the_stream_starts_supersedes_its_capability(self):
+        data = payload(2 * CHUNK)
+        candidate, capability, _nonce = self.first(data)
+        self.assertFalse(self.recorded(candidate, data, "two").replayed)
+        self.assert_refused(self.upload(candidate, capability, data), 422, "endorsement_invalid")
+        renewed = self.issuer.issue(ACTOR, candidate, self.clock_now)
+        self.assertEqual((renewed.attempt_number, renewed.renewed), (1, True))
+        self.assertEqual(self.upload(candidate, renewed, data).status, 202)
+
+    def test_a_stream_start_racing_an_endorsement_never_lets_both_through(self):
+        outcomes = set()
+        for index in range(6):
+            actor = ACTOR + 100 + index
+            data = payload(CHUNK, bytes([index]))
+            candidate, capability, _nonce = self.first(data, f"race-{index}", actor)
+            hashed = capability_sha256(capability.value)
+            key = object_key(candidate, 1, secrets.token_hex(16))
+
+            def either(which):
+                if which == 0:
+                    return self.transfers.start(hashed, key, SETTINGS.environment_id, self.clock_now)
+                return self.recorded(candidate, data, f"race-{index}-two", actor)
+
+            started, endorsed = run_threads(2, either)
+            pair = (type(started).__name__, getattr(started, "code", None),
+                    type(endorsed).__name__, getattr(endorsed, "code", None))
+            self.assertIn(pair, {("Stream", None, "AuthRefusal", "upload_in_progress"),
+                                 ("CoordinationRefusal", "endorsement_superseded", "Endorsed", None)})
+            outcomes.add(pair[0])
+            self.assertEqual(self.stored(candidate), 1 if pair[0] == "Stream" else 2)
