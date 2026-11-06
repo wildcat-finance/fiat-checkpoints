@@ -59,8 +59,10 @@ Each job gets a fresh sandbox: `runsc --network=none --host-uds=none
 --host-fifo=none`, a read-only root, uid 65532, no capabilities,
 `noNewPrivileges`, and its own PID, network, IPC, UTS and mount namespaces.
 Its environment is a fixed allowlist of six names; any other name refuses
-before launch. `/job` is a gVisor tmpfs owned by the job user, mode 0700. The
-sealed input, the trust document and the service code are read-only binds.
+before launch. `/job` is a gVisor tmpfs owned by the job user, mode 0700.
+`/tmp` is a second one with the same options: native Git writes temporary
+files there, and without it runsc mounts a world-writable, executable `/tmp`.
+The sealed input, the trust document and the service code are read-only binds.
 
 The supervisor runs as root because runsc, cgroups and per-job state need it.
 `scripts/sandbox-env.sh run` starts it in a privileged container with no
@@ -105,7 +107,7 @@ its checks use `FixedTrust` with the fixture's own test issuer reference.
 | --- | ---: | --- |
 | CPUs | 2 | cgroup `cpu.max` 200000/100000 |
 | Memory, swap disabled | 4 GiB | cgroup `memory.max`, `memory.swap.max` 0, `memory.oom.group` 1 |
-| Scratch | 8 GiB | `/job` tmpfs size and `RLIMIT_FSIZE` |
+| Scratch | 8 GiB | `/job` and `/tmp` tmpfs sizes and `RLIMIT_FSIZE`; both are job memory |
 | Processes | 256 | cgroup `pids.max`; the sentry's host threads count too |
 | CPU time | 300 s | cgroup `cpu.stat` polled by the supervisor; `RLIMIT_CPU` inside |
 | Wall time | 900 s, less the lease margin | supervisor deadline |

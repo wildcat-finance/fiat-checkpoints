@@ -334,6 +334,12 @@ class Sandbox:
             {"destination": pins.SANDBOX_JOB, "type": "tmpfs", "source": "tmpfs",
              "options": ["size=%d" % policy.scratch_bytes, "mode=0700", "uid=%d" % pins.SANDBOX_UID,
                          "gid=%d" % pins.SANDBOX_UID, "nosuid", "nodev", "noexec"]},
+            # Without this mount runsc adds a world-writable, executable tmpfs at /tmp that
+            # the scratch size does not bound. Native Git writes temporary files there, so
+            # /tmp stays writable, but private to the job user, sized and noexec like /job.
+            {"destination": "/tmp", "type": "tmpfs", "source": "tmpfs",
+             "options": ["size=%d" % policy.scratch_bytes, "mode=0700", "uid=%d" % pins.SANDBOX_UID,
+                         "gid=%d" % pins.SANDBOX_UID, "nosuid", "nodev", "noexec"]},
             {"destination": pins.SANDBOX_INPUT, "type": "bind", "source": str(directory / "input.zip"),
              "options": ["bind", "ro", "nosuid", "nodev", "noexec"]},
             {"destination": pins.SANDBOX_TRUST, "type": "bind", "source": str(directory / "trust.json"),

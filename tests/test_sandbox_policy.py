@@ -47,12 +47,12 @@ class SandboxPolicyTests(unittest.TestCase):
         self.assertTrue(config["root"]["readonly"])
         self.assertIn({"type": "network"}, config["linux"]["namespaces"])
         mounts = {mount["destination"]: mount for mount in config["mounts"]}
-        self.assertEqual({"/proc", "/job", "/input/checkpoint.zip", "/trust/job.json",
+        self.assertEqual({"/proc", "/job", "/tmp", "/input/checkpoint.zip", "/trust/job.json",
                           "/opt/fiat-checkpoints/service/src", "/opt/fiat-checkpoints/service/protocol.lock.json",
                           "/opt/fiat-checkpoints/service/protocol.trees.json"}, set(mounts))
         writable = [name for name, mount in mounts.items()
                     if mount["type"] == "tmpfs" or "rw" in mount.get("options", [])]
-        self.assertEqual(["/job"], writable)
+        self.assertEqual(["/job", "/tmp"], writable)
         self.assertEqual("tmpfs", mounts["/job"]["type"])
         self.assertEqual(["size=%d" % (8 * GIB), "mode=0700", "uid=65532", "gid=65532", "nosuid", "nodev", "noexec"],
                          mounts["/job"]["options"])
@@ -64,6 +64,15 @@ class SandboxPolicyTests(unittest.TestCase):
                                                             resources["pids"]["limit"], resources["cpu"]["quota"]))
         limits = {row["type"]: row["hard"] for row in process["rlimits"]}
         self.assertEqual({"RLIMIT_CPU": 300, "RLIMIT_NOFILE": 1024, "RLIMIT_CORE": 0, "RLIMIT_FSIZE": 8 * GIB}, limits)
+
+    def test_tmp_is_private_bounded_and_noexec_like_the_job_root(self):
+        # S6-R1-04: runsc mounts a world-writable, executable, unsized /tmp unless the
+        # spec names one; native Git writes there, so it stays writable but bounded.
+        config = Sandbox().oci_config(job(), "0" * 32, Path("/run/fiat-validator/jobs/x"))
+        tmp = [mount for mount in config["mounts"] if mount["destination"] == "/tmp"]
+        self.assertEqual(1, len(tmp), "runsc would add its own /tmp")
+        mounts = {mount["destination"]: mount for mount in config["mounts"]}
+        self.assertEqual(("tmpfs", mounts["/job"]["options"]), (tmp[0]["type"], tmp[0]["options"]))
 
     def test_environment_is_an_allowlist_with_no_credentials(self):
         config = Sandbox().oci_config(job(), "a" * 32, Path("/state/job"))

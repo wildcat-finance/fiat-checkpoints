@@ -74,7 +74,8 @@ class SandboxIsolationTests(SandboxCase):
     def test_root_toolchain_and_input_are_read_only(self):
         run = self.hostile(probe(
             "for path in ('/usr/bin/git', '/opt/fiat-checkpoints/protocol/native/x', '/input/checkpoint.zip',\n"
-            "             '/trust/job.json', '/opt/fiat-checkpoints/service/src/fiat_checkpoints/x.py', '/etc/x'):\n"
+            "             '/trust/job.json', '/opt/fiat-checkpoints/service/src/fiat_checkpoints/x.py', '/etc/x',\n"
+            "             '/var/tmp/x', '/dev/shm/x'):\n"
             "    try:\n"
             "        open(path, 'ab').write(b'x'); out[path] = 'written'\n"
             "    except OSError:\n"
@@ -84,10 +85,17 @@ class SandboxIsolationTests(SandboxCase):
             "        (os.rename('/job', '/job2') if name == 'rename' else os.rmdir('/job')); out[name] = 'done'\n"
             "    except OSError:\n"
             "        out[name] = 'refused'\n"
-            "st = os.stat('/job'); out['job'] = [st.st_uid, oct(st.st_mode)]\n"))
+            "st = os.stat('/job'); out['job'] = [st.st_uid, oct(st.st_mode)]\n"
+            "st = os.stat('/tmp'); out['tmp'] = [st.st_uid, oct(st.st_mode)]\n"
+            "open('/tmp/run.sh', 'w').write('#!/bin/sh\\necho ran\\n'); os.chmod('/tmp/run.sh', 0o755)\n"
+            "try:\n"
+            "    os.execv('/tmp/run.sh', ['/tmp/run.sh'])\n"
+            "except OSError:\n"
+            "    out['tmp-exec'] = 'refused'\n"))
         observed = stdout_json(run)
-        self.assertEqual({"refused"}, {value for key, value in observed.items() if key != "job"})
+        self.assertEqual({"refused"}, {value for key, value in observed.items() if key not in ("job", "tmp")})
         self.assertEqual([65532, "0o40700"], observed["job"])
+        self.assertEqual([65532, "0o40700"], observed["tmp"])
 
     def test_hooks_and_git_configuration_from_the_host_do_not_reach_the_job(self):
         run = self.hostile(probe(
