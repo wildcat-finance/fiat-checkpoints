@@ -20,7 +20,8 @@ the same head, and the uploader's own grant must still be current. See the
    events for that run.
 2. `projection-unavailable` or `historical-signers-unavailable` means the run's
    stored records no longer verify, or the database is unreachable. Follow the
-   `trust-projection-refused` events from adr/bind-uploads-to-enrolled-keys.
+   `trust-projection-refused` events from the
+   [upload-binding decision](../decisions/drafts/bind-uploads-to-enrolled-keys.md).
 3. `grant-not-current` rejects the candidate: the uploader's grant or key was
    revoked or expired before validation finished. The contributor needs a new
    grant and a new announce; nothing is retried.

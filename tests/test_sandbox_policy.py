@@ -7,9 +7,11 @@ no path falls back to a plain subprocess.
 
 import os
 from pathlib import Path
+import re
 import tempfile
 import unittest
 
+from fiat_checkpoints.records.trees import REPOSITORY
 from fiat_checkpoints.validation import pins
 from fiat_checkpoints.validation.policy import GIB, SPECIFICATION, ResourcePolicy
 from fiat_checkpoints.validation.refusals import ValidationRefusal
@@ -101,6 +103,21 @@ class SandboxPolicyTests(unittest.TestCase):
         self.assertEqual([orphan, lockless], sorted(reaped))
         self.assertEqual({(orphan, True, False), (lockless, False, True)}, set(cleaned))
         self.assertEqual([orphan, live, live + ".lock"], remaining)
+
+    def test_checks_and_runbooks_name_the_sandbox_launcher_and_resolve_their_decisions(self):
+        # S6-R1-02: the documented check commands name the launcher these groups need,
+        # and each validation runbook's decision reference resolves read on its own.
+        command = "scripts/sandbox-env.sh run python3 scripts/check.py --group validation,sandbox"
+        for name in ("README.md", "AGENTS.md"):
+            with self.subTest(document=name):
+                self.assertIn(command, (REPOSITORY / name).read_text(encoding="utf-8"))
+        for name in ("validation-failures.md", "policy-freshness.md"):
+            path = REPOSITORY / "docs/runbooks" / name
+            text = path.read_text(encoding="utf-8")
+            with self.subTest(runbook=name):
+                self.assertNotRegex(text, r"(?<![\w/.])adr/[a-z0-9-]+")
+                for target in re.findall(r"\]\((\.\./decisions/[^)]+)\)", text):
+                    self.assertTrue((path.parent / target).is_file(), target)
 
     def test_environment_is_an_allowlist_with_no_credentials(self):
         config = Sandbox().oci_config(job(), "a" * 32, Path("/state/job"))
