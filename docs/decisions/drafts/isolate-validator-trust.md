@@ -129,8 +129,12 @@ digest. All four stages must run in order with exit 0 (a failed restore is
 never rescued by a later verify), the reminted identity must equal the
 announced one, and coverage must be complete. A refusal carries a protocol
 code only when the whole stage stderr is one class the release lists for that
-stage. Anything else maps to fixed `validation_failed` (`native-local-errors`),
-and stderr leaves the sandbox only as its SHA-256 (Skills #1647).
+stage. When the adapter's coverage commands fail and the pinned inspect saw a
+commit signer the injected keys do not hold, `git verify-commit` could not have
+passed, so the runner reports `coverage-signer-unapproved` and the candidate is
+rejected as `signer_not_enrolled` with no protocol code. Anything else maps to
+fixed `validation_failed` (`native-local-errors`), and stderr leaves the sandbox
+only as its SHA-256 (Skills #1647).
 
 Before the job the validator reads the candidate's latest endorsement and
 challenge, requires the uploader's grant current for `upload`, requires a

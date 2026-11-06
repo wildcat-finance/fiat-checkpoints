@@ -25,6 +25,8 @@ JOB_FIELDS = frozenset({"schema", "job_id", "mode", "request", "approval", "tool
 MODES = ("validate", "inspect-case")
 CAPABILITIES = "plugins/hexaemeron/skills/fiat/checkpoint-authority/native-capabilities.json"
 INSPECT_SECONDS = 120
+# A runner-derived reason, never a protocol code: see `_signer_outside_keyring`.
+COVERAGE_SIGNER_UNAPPROVED = "coverage-signer-unapproved"
 
 
 def _emit(job_id, status, *, native_result=None, refusal=None):
@@ -105,6 +107,23 @@ def _protocol_code(library, release, attempt_root, stage):
     return name if name in allowed else None
 
 
+def _signer_outside_keyring(library, attempt_root, approval):
+    """Whether the pinned inspect saw a commit signer the injected keys do not hold.
+
+    The keyring holds exactly the approved history's keys, so `git verify-commit`
+    cannot pass for such a commit and the coverage stage fails as a command; had
+    it passed, the released check would refuse the fingerprint as unapproved.
+    Only the structured inspect output is read, never a command's diagnostic.
+    """
+    try:
+        inspected = library.native_records.inspect_result(library.canonical.decode(
+            library.native_io.read(attempt_root / "inspect.stdout", 1_048_576)))
+        approved = {row["key"]["fingerprint"] for row in approval["history"]}
+        return any(row["fingerprint"] not in approved for row in inspected["signatures"])
+    except Exception:
+        return False
+
+
 def _validate(release, library, job, root):
     native = library.native
     request = native.NativeInput(**job["request"])
@@ -119,6 +138,11 @@ def _validate(release, library, job, root):
                                       request=request, approval=approved)
     except library.canonical.Refusal as refusal:
         code = _protocol_code(library, release, root / request.attempt_id, refusal.stage)
+        if (refusal.code == "native-command-failed" and refusal.stage == "coverage"
+                and _signer_outside_keyring(library, root / request.attempt_id, approval)):
+            _emit(job["job_id"], "refused",
+                  refusal={"code": COVERAGE_SIGNER_UNAPPROVED, "stage": "coverage", "protocol_code": None})
+            return
         _emit(job["job_id"], "refused",
               refusal={"code": refusal.code, "stage": refusal.stage, "protocol_code": code})
         return

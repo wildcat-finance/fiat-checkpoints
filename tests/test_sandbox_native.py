@@ -12,7 +12,7 @@ from fiat_checkpoints.validation import fixture, outputs, pins
 from fiat_checkpoints.validation.outputs import NativeEvidence
 from fiat_checkpoints.validation.refusals import ValidationRefusal
 from fiat_checkpoints.validation.trust import RunTrust
-from tests.validation_support import SandboxCase, expected, library, request, trust
+from tests.validation_support import SandboxCase, expected, library, request, trust, unenrolled_trust
 
 
 class NativeSequenceTests(SandboxCase):
@@ -47,6 +47,16 @@ class NativeSequenceTests(SandboxCase):
                                  narrow, binds=self.binds)
         self.assertIsInstance(outcome, ValidationRefusal)
         self.assertEqual("signer_not_enrolled", outcome.code)
+
+    def test_a_signer_absent_from_the_injected_keys_is_signer_not_enrolled(self):
+        # S6-R1-02: git cannot verify the fixture's commits with only the synthetic key in
+        # the keyring, so the coverage stage fails; that rejects instead of retrying.
+        outcome, run = fixture.run(self.sandbox, self.release, fixture.valid_archive(self.release), request(),
+                                   unenrolled_trust(), binds=self.binds)
+        self.assertIsInstance(outcome, ValidationRefusal)
+        self.assertEqual(("signer_not_enrolled", "coverage-signer-unapproved", None),
+                         (outcome.code, outcome.reason, outcome.protocol_code))
+        self.assertIsNone(run.killed)
 
     def test_a_previous_jobs_output_is_stale_for_the_next(self):
         _, first = self.valid_job(attempt="first-attempt")

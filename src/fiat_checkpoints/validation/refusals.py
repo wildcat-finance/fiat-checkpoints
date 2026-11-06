@@ -27,6 +27,10 @@ RETRY_REASON = {
     "authority_unavailable": "storage_unavailable",
 }
 NATIVE_STAGES = ("inspect", "restore", "verify", "identity")
+# The runner's reason when the coverage stage's commands failed and the pinned
+# inspect saw a signer outside the injected keys: git cannot verify that
+# commit, so the failure is the signer, not the tool. No protocol code is set.
+COVERAGE_SIGNER_UNAPPROVED = "coverage-signer-unapproved"
 
 # The native adapter's request joins: the archive is not the one announced.
 IDENTITY_CODES = frozenset({
@@ -105,6 +109,8 @@ def classify(code, stage, protocol_code=None):
             return ValidationRefusal("protocol_refused", "native-command-refused",
                                      protocol_code=protocol_code, stage=stage)
         return ValidationRefusal("validation_failed", "native-command-unmapped", stage=_stage(stage))
+    if code == COVERAGE_SIGNER_UNAPPROVED and stage == "coverage":
+        return ValidationRefusal("signer_not_enrolled", COVERAGE_SIGNER_UNAPPROVED, stage="coverage")
     if code in IDENTITY_CODES:
         return ValidationRefusal("identity_mismatch", "native-identity-join", protocol_code=code,
                                  stage=_stage(stage))

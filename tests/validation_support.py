@@ -8,6 +8,7 @@ validator image's supervisor (`scripts/sandbox-env.sh run`); every archive is
 the released synthetic fixture or a specimen rebuilt from it.
 """
 
+import base64
 import copy
 import functools
 import hashlib
@@ -22,6 +23,15 @@ from fiat_checkpoints.validation.service import service_binds
 
 
 JOB_ID = "0123456789abcdef0123456789abcdef"
+# A synthetic OpenPGP public key that signed nothing; its private half was
+# destroyed when it was made. No approved history names it outside these tests.
+UNENROLLED_FINGERPRINT = "F172AF897348F6BB31217916A7CEF178BD18A6AA"
+UNENROLLED_PUBLIC = base64.b64decode(
+    "mDMEau4bRRYJKwYBBAHaRw8BAQdAoR1qCmzgsLXtMDDRyzKuBvS4c+9X2DxX0EVkn6A9Eyq0MFN5bnRoZXRpYyBVbmVucm9sbGVk"
+    "IDxzeW50aGV0aWNAZXhhbXBsZS5pbnZhbGlkPoivBBMWCgBXFiEE8XKviXNI9rsxIXkWp87xeL0YpqoFAmruG0UbFIAAAAAABAAO"
+    "bWFudTIsMi41KzEuMTIsMCwzAhsDBQsJCAcCAiICBhUKCQgLAgQWAgMBAh4HAheAAAoJEKfO8Xi9GKaqS5oBAL5glRjxilC3uz1H"
+    "72VAiKYDQ8ikod9vXoA5wOpBUb4mAQCwVhuD3lDosI+9DWNIdjUKBOoZ9uhF4RFHCjq70wsLAg=="
+)
 
 
 @functools.cache
@@ -43,6 +53,14 @@ def request(**changes):
 
 def trust():
     return fixture.run_trust(release())
+
+
+def unenrolled_trust():
+    """The fixture's run with only the synthetic key approved, so its real signer is not."""
+    from fiat_checkpoints.validation.trust import HistoricalKey, RunTrust
+    value, _ = fixture.released(release())
+    key = HistoricalKey(UNENROLLED_FINGERPRINT, UNENROLLED_PUBLIC, "key-enrollment", "b" * 64, 17, 1, 2)
+    return RunTrust(value["anchor_sha256"], value["initial_base"], value["start_commit"], (key,))
 
 
 def expected(job_id=JOB_ID, job_request=None, run_trust=None):

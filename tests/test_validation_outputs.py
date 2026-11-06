@@ -7,11 +7,17 @@ and the stage allowlist that keeps raw diagnostics private (Skills #1647).
 """
 
 import copy
+import io
+from pathlib import Path
+import sys
+import tempfile
 import unittest
+from unittest import mock
 
 from fiat_checkpoints.validation import outputs
 from fiat_checkpoints.validation.refusals import ValidationRefusal
-from tests.validation_support import JOB_ID, expected, library, native_record, request, result_line, run_of
+from tests.validation_support import (JOB_ID, expected, library, native_record, release, request, result_line,
+                                      run_of, trust, unenrolled_trust)
 
 
 class ValidationOutputTests(unittest.TestCase):
@@ -181,6 +187,56 @@ class ValidationOutputTests(unittest.TestCase):
         self.assertEqual(JOB_ID, passed.job_id)
         with self.assertRaises(ValidationRefusal):
             outputs.read(run_of(result_line(record=native_record())), expected(), library(), mode="inspect-case")
+
+
+class CoverageSignerTests(unittest.TestCase):
+    """S6-R1-02: a signer the injected keys do not hold makes `git verify-commit` fail in the
+    adapter's coverage stage; that is the signer, so it rejects instead of retrying."""
+
+    def run_coverage_failure(self, run_trust):
+        from fiat_checkpoints.validation import fixture, runner
+        lib = library()
+        value, _ = fixture.released(release())
+        job = {"job_id": JOB_ID, "request": request(), "approval": run_trust.approval(), "tools": []}
+
+        def failing_coverage(archive, *, job_root, pin, request, approval):
+            attempt = job_root / request.attempt_id
+            attempt.mkdir(mode=0o700)
+            lib.native_io.create(attempt / "inspect.stdout",
+                                 lib.canonical.canonical(value["original_outputs"]["inspect"]))
+            raise lib.canonical.Refusal("native-command-failed", "coverage")
+
+        output = io.BytesIO()
+        stream = io.TextIOWrapper(output, encoding="ascii")
+        with tempfile.TemporaryDirectory() as root, \
+                mock.patch.object(lib.native, "verify_native", failing_coverage), \
+                mock.patch.object(runner, "_pin", lambda *arguments: None), \
+                mock.patch.object(runner, "_LIBRARY", lib), mock.patch.object(sys, "stdout", stream):
+            runner._validate(release(), lib, job, Path(root))
+            stream.flush()
+            line = output.getvalue()
+        with self.assertRaises(ValidationRefusal) as caught:
+            outputs.read(run_of(line), expected(run_trust=run_trust), lib)
+        return caught.exception
+
+    def test_a_signer_outside_the_injected_keys_is_signer_not_enrolled(self):
+        refusal = self.run_coverage_failure(unenrolled_trust())
+        self.assertEqual(("signer_not_enrolled", "coverage-signer-unapproved", None, "coverage"),
+                         (refusal.code, refusal.reason, refusal.protocol_code, refusal.stage))
+        self.assertTrue(refusal.deterministic)
+
+    def test_a_coverage_failure_with_every_signer_held_stays_unmapped(self):
+        refusal = self.run_coverage_failure(trust())
+        self.assertEqual(("validation_failed", "native-command-unmapped"), (refusal.code, refusal.reason))
+
+    def test_the_coverage_signer_reason_maps_only_at_coverage(self):
+        for stage, code in (("coverage", "signer_not_enrolled"), ("restore", "validation_failed")):
+            with self.subTest(stage=stage):
+                with self.assertRaises(ValidationRefusal) as caught:
+                    outputs.read(run_of(result_line(status="refused", refusal={
+                        "code": "coverage-signer-unapproved", "stage": stage, "protocol_code": None})),
+                        expected(), library())
+                self.assertEqual(code, caught.exception.code)
 
 
 if __name__ == "__main__":
