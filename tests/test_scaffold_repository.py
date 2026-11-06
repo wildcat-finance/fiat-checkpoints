@@ -268,13 +268,7 @@ class ProvenanceTests(unittest.TestCase):
         # Step 3 ships numbered SQL migrations and nothing else there.
         for path in (ROOT / "migrations").iterdir():
             self.assertRegex(path.name, r"^\d{4}_[a-z0-9_]+\.sql$")
-        package = ROOT / "src/fiat_checkpoints"
-        # Step 4 fills auth and grants; validation stays reserved for Step 6.
-        for name in ("validation",):
-            with self.subTest(module=name):
-                self.assertEqual([p.name for p in (package / name).iterdir() if p.name != "__pycache__"],
-                                 ["__init__.py"])
-                self.assertEqual((package / name / "__init__.py").read_bytes(), b"")
+        # Step 6 fills validation, the last reserved module location.
 
     def test_readme_names_the_start_and_check_commands(self):
         readme = (ROOT / "README.md").read_text()

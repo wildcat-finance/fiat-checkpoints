@@ -89,6 +89,14 @@ scripts/linux-env.sh run python3 scripts/check.py --group upload,quarantine
 scripts/linux-env.sh facts
 ```
 
+The `validation` and `sandbox` groups start gVisor, so `scripts/sandbox-env.sh` runs them in the validator image:
+
+```sh
+SKILLS_REPO=<skills clone> scripts/sandbox-env.sh build
+scripts/sandbox-env.sh run python3 scripts/check.py --group validation,sandbox
+scripts/sandbox-env.sh facts
+```
+
 `db-start` runs the digest-pinned PostgreSQL 16 test server with no network.
 The test container reaches it only through a Unix socket volume, and each test
 creates and drops its own database; the persistence, concurrency, auth,

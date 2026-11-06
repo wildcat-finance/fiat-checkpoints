@@ -37,6 +37,9 @@ success. The `persistence`, `concurrency`, `auth`, `endorsement`, `upload`
 and `quarantine` groups need `scripts/linux-env.sh db-start` first. Keep a
 failure's evidence and find its cause before changing code.
 
+The `validation` and `sandbox` groups start gVisor and run only through `scripts/sandbox-env.sh`:
+`scripts/sandbox-env.sh run python3 scripts/check.py --group validation,sandbox`.
+
 ## Records and data
 
 Decision records start as numberless drafts under `docs/decisions/drafts/`;
