@@ -74,6 +74,34 @@ class SandboxPolicyTests(unittest.TestCase):
         mounts = {mount["destination"]: mount for mount in config["mounts"]}
         self.assertEqual(("tmpfs", mounts["/job"]["options"]), (tmp[0]["type"], tmp[0]["options"]))
 
+    def test_reap_removes_only_jobs_whose_lock_is_free(self):
+        # S6-R1-05: a job whose supervisor died keeps its sandbox, cgroup and state
+        # until the next start reaps it; a job whose lock is held is live and stays.
+        self.assertTrue(callable(getattr(Sandbox, "reap", None)), "no reaper for a dead supervisor's jobs")
+        import fcntl
+        from unittest import mock
+        orphan, live, lockless = "a" * 32, "b" * 32, "c" * 32
+        cleaned = []
+        with tempfile.TemporaryDirectory() as root:
+            state, groups = Path(root) / "state", Path(root) / "cgroup"
+            (state / "jobs").mkdir(parents=True)
+            for job_id in (orphan, live):
+                (state / "jobs" / job_id).mkdir()
+                (state / "jobs" / (job_id + ".lock")).touch()
+            (groups / "fiat-validator" / lockless).mkdir(parents=True)
+            held = os.open(state / "jobs" / (live + ".lock"), os.O_RDWR)
+            fcntl.flock(held, fcntl.LOCK_EX)
+            try:
+                with mock.patch.object(Sandbox, "_cleanup", lambda self, job_id, directory, cgroup: cleaned.append(
+                        (job_id, directory is not None, cgroup is not None))):
+                    reaped = Sandbox(state_root=state, cgroup_root=groups).reap()
+                remaining = sorted(os.listdir(state / "jobs"))
+            finally:
+                os.close(held)
+        self.assertEqual([orphan, lockless], sorted(reaped))
+        self.assertEqual({(orphan, True, False), (lockless, False, True)}, set(cleaned))
+        self.assertEqual([orphan, live, live + ".lock"], remaining)
+
     def test_environment_is_an_allowlist_with_no_credentials(self):
         config = Sandbox().oci_config(job(), "a" * 32, Path("/state/job"))
         names = {entry.split("=", 1)[0] for entry in config["process"]["env"]}

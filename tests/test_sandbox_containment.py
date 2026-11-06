@@ -189,6 +189,36 @@ class SandboxOtherJobTests(SandboxCase):
             thread.join()
 
 
+class SandboxCrashTests(SandboxCase):
+    def test_a_dead_supervisors_job_is_reaped_before_the_next_job(self):
+        # S6-R1-05: a supervisor killed mid-job leaves its sandbox running past every
+        # supervisor-held ceiling; the next job's start kills and removes it.
+        import subprocess
+        import sys
+        import time
+        from fiat_checkpoints.records.trees import REPOSITORY
+        from fiat_checkpoints.validation.sandbox import leftovers
+        script = ("import sys\nsys.path.insert(0, sys.argv[1])\n"
+                  "from fiat_checkpoints.validation import pins\n"
+                  "from fiat_checkpoints.validation.sandbox import Sandbox, SandboxJob\n"
+                  "Sandbox(slots=1).run(SandboxJob(owner='crashed', trust=b'{}',\n"
+                  "    argv=(pins.SANDBOX_PYTHON, '-I', '-c', 'import time; time.sleep(600)')))\n")
+        child = subprocess.Popen([sys.executable, "-I", "-c", script, str(REPOSITORY / "src")])
+        try:
+            deadline = time.monotonic() + 180
+            while not leftovers()["cgroups"] and time.monotonic() < deadline:
+                time.sleep(1)
+            time.sleep(15)
+        finally:
+            child.kill()
+            child.wait()
+        time.sleep(5)
+        self.assertEqual(1, len(leftovers()["cgroups"]))
+        run = self.hostile("print('{}')", owner="crashed")
+        self.assertEqual(0, run.exit)
+        self.assertEqual({"jobs": [], "cgroups": []}, leftovers())
+
+
 class SandboxStateSwapTests(SandboxCase):
     def test_replaced_job_state_directory_refuses_before_launch(self):
         # Skills #1648: a swap of the job's state path after it was created is detected.

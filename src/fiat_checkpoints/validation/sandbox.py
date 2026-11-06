@@ -16,8 +16,10 @@ The supervisor is trusted and runs as root; the job is not. Each job gets:
 - `runsc` with no network, no host sockets or FIFOs, and a read-only root.
 
 Jobs that name the same owner never overlap (Skills #1649), and at most
-`slots` jobs run at once. A job's stdout is capped and returned for strict
-parsing; its stderr is capped, hashed and kept private (Skills #1647). On any
+`slots` jobs run at once. Each job holds a lock for its whole life; before a
+new job starts, any job whose lock is free lost its supervisor and is killed
+and removed, so a crash leaves no sandbox running past its deadline. A job's
+stdout is capped and returned for strict parsing; its stderr is capped, hashed and kept private (Skills #1647). On any
 exit the whole cgroup is killed, the sandbox deleted (with its tmpfs) and the
 state directory removed. A missing or altered runsc, root filesystem or
 cgroup controller refuses as `sandbox_unavailable`; nothing falls back to a
@@ -30,6 +32,7 @@ import json
 import logging
 import os
 from pathlib import Path
+import re
 import secrets
 import selectors
 import shutil
@@ -56,6 +59,7 @@ CPU_PERIOD_US = 100_000
 POLL_SECONDS = 0.05
 KILL_GRACE_SECONDS = 30
 JOB_ID_BYTES = 16
+JOB_NAME = re.compile(r"[0-9a-f]{%d}" % (2 * JOB_ID_BYTES))
 ENVIRONMENT = (("PATH", "/usr/local/bin:/usr/bin:/bin"), ("LANG", "C.UTF-8"), ("LC_ALL", "C"),
                ("HOME", "/job"), ("TMPDIR", "/job"), ("PYTHONDONTWRITEBYTECODE", "1"))
 ENVIRONMENT_NAMES = frozenset({"PATH", "LANG", "LC_ALL", "HOME", "TMPDIR", "PYTHONDONTWRITEBYTECODE",
@@ -220,6 +224,7 @@ class Sandbox:
             raise _unavailable("sandbox-job-invalid")
         self.check()
         self._state()
+        self.reap()
         owner_key = hashlib.sha256(job.owner.encode("utf-8")).hexdigest()
         with self._lock:
             if owner_key in self._owners:
@@ -247,11 +252,74 @@ class Sandbox:
                 self._owners.discard(owner_key)
                 self._running -= 1
 
+    def _reaper_lock(self):
+        return os.open(self.state_root / "reaper.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC,
+                       0o600)
+
+    def _job_lock(self, job_id):
+        """Create and hold the job's lock; the reaper never sees it unheld while live."""
+        guard = self._reaper_lock()
+        try:
+            fcntl.flock(guard, fcntl.LOCK_SH)
+            lock = os.open(self.state_root / "jobs" / (job_id + ".lock"),
+                           os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return lock
+        finally:
+            os.close(guard)
+
+    def reap(self):
+        """Kill and remove every job whose supervisor died; returns their ids.
+
+        A live job holds its lock, so only a job whose lock is free or missing is
+        reaped: its sandbox, cgroup and state go, as the dead supervisor's own
+        cleanup would have done. Live jobs, in this process or another, stay.
+        """
+        jobs = self.state_root / "jobs"
+        parent = self.cgroup_root / CGROUP_PARENT
+        guard = self._reaper_lock()
+        reaped = []
+        try:
+            fcntl.flock(guard, fcntl.LOCK_EX)
+            names = set(os.listdir(jobs))
+            if parent.is_dir():
+                names |= {entry.name for entry in os.scandir(parent) if entry.is_dir()}
+            for job_id in sorted({name.removesuffix(".lock") for name in names}):
+                if JOB_NAME.fullmatch(job_id) is None:
+                    continue
+                lock_path = jobs / (job_id + ".lock")
+                try:
+                    lock = os.open(lock_path, os.O_RDWR | os.O_NOFOLLOW | os.O_CLOEXEC)
+                except FileNotFoundError:
+                    lock = None
+                try:
+                    if lock is not None:
+                        try:
+                            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        except BlockingIOError:
+                            continue
+                    directory = jobs / job_id
+                    cgroup = parent / job_id
+                    self._cleanup(job_id, directory if directory.is_dir() else None,
+                                  cgroup if cgroup.is_dir() else None)
+                    lock_path.unlink(missing_ok=True)
+                    reaped.append(job_id)
+                    LOGGER.warning("sandbox-orphan-reaped", extra={"event": "sandbox-orphan-reaped", "job": job_id})
+                finally:
+                    if lock is not None:
+                        os.close(lock)
+        except OSError:
+            raise _unavailable("sandbox-state-unavailable") from None
+        finally:
+            os.close(guard)
+        return reaped
+
     def _run(self, job):
         job_id = secrets.token_hex(JOB_ID_BYTES)
         directory = self.state_root / "jobs" / job_id
         cgroup = None
         created = False
+        lock = self._job_lock(job_id)
         try:
             os.mkdir(directory, 0o700)
             created = True
@@ -270,7 +338,11 @@ class Sandbox:
         except OSError:
             raise _unavailable("sandbox-setup-failed") from None
         finally:
-            self._cleanup(job_id, directory if created else None, cgroup)
+            try:
+                self._cleanup(job_id, directory if created else None, cgroup)
+            finally:
+                (self.state_root / "jobs" / (job_id + ".lock")).unlink(missing_ok=True)
+                os.close(lock)
 
     @staticmethod
     def _same(held, directory):
@@ -518,6 +590,8 @@ class Sandbox:
 def leftovers(state_root=STATE_ROOT, cgroup_root=CGROUP_ROOT):
     """Job state directories and cgroups still present; an operator's first check."""
     jobs = sorted(os.listdir(Path(state_root) / "jobs")) if (Path(state_root) / "jobs").is_dir() else []
+    # A live job's lock sits beside its directory; a lock left alone is listed.
+    jobs = [name for name in jobs if not name.endswith(".lock") or name.removesuffix(".lock") not in jobs]
     parent = Path(cgroup_root) / CGROUP_PARENT
     groups = sorted(entry.name for entry in os.scandir(parent) if entry.is_dir()) if parent.is_dir() else []
     return {"jobs": jobs, "cgroups": groups}
