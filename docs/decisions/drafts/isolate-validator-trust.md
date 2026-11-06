@@ -166,8 +166,14 @@ at the declared stage.
 | Complete commit-signature coverage against approved public keys | The external authority-head freshness check (`eligibility.current`); the intent records the trust head it used |
 | Registered root anchor and initial base | Parent chains other than a registered root (`capability_not_enabled`) |
 | Uploader grant and key current at the start and the end | A decompressed Git-object secret scan; the inspector's raw-member scan stands |
-| No network, credential, host socket, shared parent or other job | An exact 100,000-node ceiling: gVisor's tmpfs ignores `nr_inodes`, so nodes are bounded only by memory |
+| No network, credential, host socket, shared parent or other job | An exact 100,000-node ceiling: gVisor's tmpfs ignores `nr_inodes`, so nodes are bounded only by memory. With `nr_inodes=100000` on `/job` and `/tmp`, runsc started the job, the option was absent from its mount table, and the job created 151,151 nodes |
 | Memory, processes, CPU time, wall time, output ceilings | Scratch measured apart from memory: tmpfs pages are sentry memory |
+
+Every intent's evidence therefore records `parent_link_record_verified` and
+`external_freshness_head` as false: prior evidence and policy freshness are
+checked against the stored trust head only. The Step 6 Exit amendment of
+2026-11-06 carries the parent-link record and the external freshness head to
+issue #2, which owns both checks.
 
 ## Measured
 
