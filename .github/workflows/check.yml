@@ -8,7 +8,7 @@ permissions:
 jobs:
   scaffold:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
@@ -62,6 +62,17 @@ jobs:
           --volume fiat-checkpoints-postgres-socket:/run/fiat-postgres
           --volume "$PWD:$PWD" --workdir "$PWD" fiat-checkpoints-test:ci
           python3 scripts/check.py --group upload,quarantine
+      - name: Build the pinned validator image
+        env:
+          SKILLS_REPO: .skills-source
+          DOCKER_CONTEXT: default
+          FIAT_VALIDATOR_IMAGE: fiat-checkpoints-validator:ci
+        run: scripts/sandbox-env.sh build
+      - name: Check validation and the gVisor sandbox in the validator image
+        env:
+          DOCKER_CONTEXT: default
+          FIAT_VALIDATOR_IMAGE: fiat-checkpoints-validator:ci
+        run: scripts/sandbox-env.sh run python3 scripts/check.py --group validation,sandbox
       - name: Stop the PostgreSQL test server
         if: always()
         run: scripts/test-postgres.sh stop
