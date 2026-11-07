@@ -11,13 +11,21 @@ service code with no protocol code, message or traceback.
 
 from dataclasses import dataclass
 import hashlib
+import os
 
 from fiat_checkpoints.records.refusals import RecordRefusal, from_protocol
 
 
 OPENSSL_PATH = "/usr/bin/openssl"
-# OpenSSL 3.5.6 as shipped in the digest-pinned python:3.14.6-slim-trixie base image.
-OPENSSL_SHA256 = "38633817061f9d161c8b14c1ff72c9f223e8208d977a4c15d843010611a5dded"
+# OpenSSL 3.5.6 as shipped in the digest-pinned python:3.14.6-slim-trixie base
+# image for each architecture an image is built for: x86_64 for the test and
+# validator images, aarch64 for the latency image. Any other host has no pin,
+# and the pinned verifier refuses it as `tool_unavailable`.
+OPENSSL_SHA256_BY_MACHINE = {
+    "x86_64": "38633817061f9d161c8b14c1ff72c9f223e8208d977a4c15d843010611a5dded",
+    "aarch64": "00bb32da712af5e39120c4085e36e57936a62ccf25be7c6230fcf6d27132ba39",
+}
+OPENSSL_SHA256 = OPENSSL_SHA256_BY_MACHINE.get(os.uname().machine)
 ENVIRONMENTS = ("test", "production")
 # The library refuses by `Refusal`; these are what it raises on a shape it never checked.
 UNEXPECTED = (LookupError, TypeError, AttributeError, ValueError, RecursionError)

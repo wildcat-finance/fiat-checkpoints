@@ -8,16 +8,24 @@
 # volume, which a test container mounts at /run/fiat-postgres. Its data lives
 # in tmpfs and holds only synthetic check data. Docker's own DOCKER_CONTEXT
 # selects the engine, so scripts/linux-env.sh and CI share these pins.
+# FIAT_TEST_PLATFORM picks the image platform from the same pinned index:
+# linux/amd64 unless the latency profile asks for linux/arm64.
 set -eu
 
 IMAGE=postgres:16.15-trixie@sha256:1a6ab3f5345eb6dbe04a1349529caabdb0ab09293a09590fad07b2246bfa4b54
 CONTAINER=fiat-checkpoints-postgres
+PLATFORM=${FIAT_TEST_PLATFORM:-linux/amd64}
 VOLUME=fiat-checkpoints-postgres-socket
 
 refuse() {
   printf 'test-postgres-refused: %s\n' "$1" >&2
   exit 2
 }
+
+case "$PLATFORM" in
+  linux/amd64|linux/arm64) ;;
+  *) refuse platform-unknown ;;
+esac
 
 case "${1:-}" in
   start)
@@ -27,7 +35,7 @@ case "${1:-}" in
     docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
     docker volume create "$VOLUME" >/dev/null
     # Local socket connections are trusted; nothing else can reach the server.
-    docker run --detach --name "$CONTAINER" --platform linux/amd64 --network none \
+    docker run --detach --name "$CONTAINER" --platform "$PLATFORM" --network none \
       --user 999:999 --tmpfs /var/lib/postgresql/data:rw,uid=999,gid=999,mode=0700 \
       --volume "$VOLUME:/var/run/postgresql" --entrypoint /bin/sh "$IMAGE" -c \
       'initdb --pgdata=/var/lib/postgresql/data/cluster --username=postgres --auth-local=trust --auth-host=reject --encoding=UTF8 --no-locale >/dev/null && exec postgres -D /var/lib/postgresql/data/cluster -c listen_addresses= -c unix_socket_directories=/var/run/postgresql -c unix_socket_permissions=0777 -c max_connections=200' \
