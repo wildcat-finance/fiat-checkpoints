@@ -20,6 +20,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 from fiat_checkpoints.api.app import StartupRefusal, production_refusals
 from fiat_checkpoints.api.gateway import create_gateway_app
@@ -33,7 +34,7 @@ from fiat_checkpoints.validation.service import COVERAGE, SCHEMA_EVIDENCE
 from fiat_checkpoints.validation.trust import canonical
 from tests import authority_fixtures as fixtures
 from tests.auth_support import SETTINGS
-from tests.test_demo_scenario import SCHEMA, main, run_scenario
+from tests.test_demo_scenario import IMAGE_ENVIRONMENT, SCHEMA, DemoRefusal, images, main, run_scenario
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -132,6 +133,9 @@ class IntakeValidationDemoTests(unittest.TestCase):
         self.assertFalse({"signature", "signatures", "payloadType", "envelope", "receipt"} & set(evidence))
         self.assertFalse(evidence["coverage"]["accepted"])
 
+    def test_the_report_carries_the_three_image_ids_the_launcher_passed(self):
+        self.assertEqual(self.report["images"], {name: os.environ[variable] for name, variable in IMAGE_ENVIRONMENT})
+
     def test_a_restarted_service_serves_the_same_intent(self):
         restart = self.report["restart"]
         self.assertEqual(restart["state"], "publishing")
@@ -191,6 +195,35 @@ class DemoArgumentTests(unittest.TestCase):
         stderr = io.StringIO()
         with contextlib.redirect_stderr(stderr):
             self.assertEqual(main(["--scenario", "intake-validation"]), 2)
+
+
+class DemoImageTests(unittest.TestCase):
+    """S7-R1-05: the report names the validator, test and PostgreSQL images, or the demonstration refuses."""
+
+    IDS = {"FIAT_IMAGE_VALIDATOR": "sha256:" + "a" * 64, "FIAT_IMAGE_TEST": "sha256:" + "b" * 64,
+           "FIAT_IMAGE_POSTGRES": "sha256:" + "c" * 64}
+
+    def test_all_three_ids_are_recorded(self):
+        self.assertEqual(images(self.IDS), {"validator": "sha256:" + "a" * 64, "test": "sha256:" + "b" * 64,
+                                            "postgres": "sha256:" + "c" * 64})
+
+    def test_a_missing_or_malformed_id_refuses(self):
+        for variable in self.IDS:
+            for value in (None, "", "sha256:" + "A" * 64, "fiat-checkpoints-test:local", "sha256:" + "a" * 63):
+                environ = {name: item for name, item in self.IDS.items() if name != variable}
+                if value is not None:
+                    environ[variable] = value
+                with self.subTest(variable=variable, value=value), self.assertRaises(DemoRefusal) as caught:
+                    images(environ)
+                self.assertEqual(str(caught.exception), "image-digest-missing")
+
+    def test_the_demonstration_refuses_before_starting_anything(self):
+        environ = {name: item for name, item in self.IDS.items() if name != "FIAT_IMAGE_POSTGRES"}
+        stderr = io.StringIO()
+        with mock.patch.dict(os.environ, environ, clear=True), contextlib.redirect_stderr(stderr), \
+                mock.patch("fiat_checkpoints.telemetry.logging.configure_logging"):
+            code = main(["--scenario", "intake-validation", "--profile", "local"])
+        self.assertEqual((code, stderr.getvalue().strip()), (2, "demo-refused: image-digest-missing"))
 
 
 class DemoScriptTests(unittest.TestCase):

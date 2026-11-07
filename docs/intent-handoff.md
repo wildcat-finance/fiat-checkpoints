@@ -24,8 +24,9 @@ loopback. Contributors log in through an in-process identity provider, announce,
 sign an upload endorsement with an operator-enrolled key, upload through the
 gateway and complete. The validator then stages the sealed bytes and runs the
 pinned native sequence in a fresh gVisor sandbox. The report lists the source,
-protocol, runtime, sandbox and fixture digests, each reply's status, code and
-request id, and the observed refusals:
+protocol, runtime, sandbox and fixture digests, the validator, test and
+PostgreSQL image ids that `scripts/sandbox-env.sh run` passes in, each reply's
+status, code and request id, and the observed refusals:
 
 | Case | What happens | Intent |
 | --- | --- | --- |

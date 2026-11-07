@@ -29,6 +29,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import re
 import socket
 import sys
 import tempfile
@@ -73,6 +74,11 @@ METADATA_ROUTES = ("announce", "endorsement", "complete", "status")
 # Source the demonstration ran, hashed file by file; nothing outside these is read.
 SOURCE_PARTS = ("src", "scripts", "tests", "migrations", "config", "containers")
 SOURCE_FILES = ("protocol.lock.json", "protocol.trees.json", "pyproject.toml", "uv.lock")
+# A container cannot read its own image id, so `scripts/sandbox-env.sh run` passes
+# the three image ids in; the demonstration refuses without all of them (S7-R1-05).
+IMAGE_ENVIRONMENT = (("validator", "FIAT_IMAGE_VALIDATOR"), ("test", "FIAT_IMAGE_TEST"),
+                     ("postgres", "FIAT_IMAGE_POSTGRES"))
+IMAGE_ID = re.compile(r"sha256:[0-9a-f]{64}")
 
 
 class DemoRefusal(Exception):
@@ -401,16 +407,29 @@ def outcome_of(outcome):
             "wall_ms": None if not outcome.resources else outcome.resources.get("wall_ms")}
 
 
+def images(environ=None):
+    """The validator, test and PostgreSQL image ids the launcher passed in; any absent one refuses."""
+    environ = os.environ if environ is None else environ
+    found = {}
+    for name, variable in IMAGE_ENVIRONMENT:
+        value = environ.get(variable)
+        if type(value) is not str or IMAGE_ID.fullmatch(value) is None:
+            raise DemoRefusal("image-digest-missing")
+        found[name] = value
+    return found
+
+
 def run_scenario(sandbox=None):
     """Run every case once and return the report; a broken precondition raises `DemoRefusal`."""
+    seen = images()
     sandbox = Sandbox() if sandbox is None else sandbox
     with ExitStack() as stack:
         service = Service(stack)
         stack.callback(service.stop)
-        return _scenario(service, sandbox)
+        return _scenario(service, sandbox, seen)
 
 
-def _scenario(service, sandbox):
+def _scenario(service, sandbox, seen):
     release, value = service.release, service.value
     archive = fixture.valid_archive(release)
     valid = identities_of(value, archive)
@@ -513,17 +532,17 @@ def _scenario(service, sandbox):
         "accepted": service.count("SELECT count(*) FROM candidates WHERE state = 'accepted'"),
         "publish_jobs": service.count("SELECT count(*) FROM outbox_jobs WHERE kind = 'publish-intent'"),
     }
-    return report(service, cases, restart, authority, evidence, archive)
+    return report(service, cases, restart, authority, evidence, archive, seen)
 
 
-def report(service, cases, restart, authority, evidence, archive):
+def report(service, cases, restart, authority, evidence, archive, seen):
     release = service.release
     decoded = None if evidence is None else json.loads(evidence)
     result = {
         "schema": SCHEMA, "scenario": "intake-validation", "profile": "local",
         "source": source_digest(), "runtime": runtime(),
         "release": {"lock_sha256": release.lock_sha256, "trees_sha256": release.trees_sha256},
-        "pins": pins.record(),
+        "pins": pins.record(), "images": dict(seen),
         "fixture": {"outer_sha256": hashlib.sha256(archive).hexdigest(), "bytes": len(archive),
                     "snapshot_id": service.value["snapshot_id"]},
         "cases": cases, "restart": restart, "authority": authority,
