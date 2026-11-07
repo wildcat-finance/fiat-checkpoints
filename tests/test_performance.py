@@ -11,8 +11,10 @@ which the `gateway-stream-memory` design criterion also calls.
 """
 
 import unittest
+from unittest import mock
 
 from fiat_checkpoints.demo.streams import measure_stream_memory
+from fiat_checkpoints.upload.staging import Reservation
 from fiat_checkpoints.records.trees import REPOSITORY
 from fiat_checkpoints.validation.benchmark import measure as measure_validation
 from fiat_checkpoints.validation.sandbox import Sandbox
@@ -55,6 +57,20 @@ class GatewayStreamMemoryTests(unittest.TestCase):
             self.assertLessEqual(row["incremental_python_bytes"], STREAM_MEMORY_CEILING)
             self.assertEqual(row["staged_after_bytes"], 0)
         self.assertLess(rows[1]["incremental_python_bytes"] - rows[0]["incremental_python_bytes"], 4 * MIB)
+
+    def test_a_staging_write_that_keeps_every_chunk_is_measured(self):
+        # S7-R1-03: with one shared chunk object, keeping every chunk measured as about 2 MiB.
+        kept, write = [], Reservation.write
+
+        def keeping(reservation, chunk):
+            kept.append(chunk)
+            return write(reservation, chunk)
+
+        with mock.patch.object(Reservation, "write", keeping):
+            rows = measure_stream_memory()
+        self.assertEqual(sum(len(chunk) for chunk in kept), 100 * MIB)
+        kept.clear()
+        self.assertGreater(rows[1]["incremental_python_bytes"], STREAM_MEMORY_CEILING)
 
 
 class ValidationWallTimeTests(unittest.TestCase):

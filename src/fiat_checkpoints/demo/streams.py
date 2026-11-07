@@ -2,7 +2,7 @@
 
 One scratch database, one private staging area and one local quarantine store
 take two synthetic streams, of 4 MiB and 96 MiB, through the real gateway in
-262,144-byte body messages. Memory is the traced Python allocation peak above
+262,144-byte body messages, each a fresh bytes object. Memory is the traced Python allocation peak above
 the level before the request, across every thread; disk is the largest staged
 total seen between chunks and the staged and stored totals afterwards. The
 grant check is answered in process and the endorsement is written as the row
@@ -93,7 +93,9 @@ async def _put(app, path, headers, block, count, sample):
         if index % SAMPLE_EVERY == 0:
             sample()
         index += 1
-        return {"type": "http.request", "body": block, "more_body": index < count}
+        # A fresh object per message, as a server delivers it: a shared one would
+        # hide a gateway that keeps every chunk (S7-R1-03).
+        return {"type": "http.request", "body": bytes(memoryview(block)), "more_body": index < count}
 
     async def send(message):
         sent.append(message)
