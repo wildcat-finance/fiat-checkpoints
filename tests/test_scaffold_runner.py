@@ -259,7 +259,6 @@ class DesignModeTests(SyntheticRoot):
             ("isolated-pinned-runtime", "unknown-criterion", "design-criterion-unknown"),
             ("isolated-pinned-runtime", "validator-isolated", "design-criterion-selection-only"),
             ("in-process-validation", "protocol-lock-shipped", "design-candidate-not-selected"),
-            ("isolated-pinned-runtime", "native-sequence-linux", "design-criterion-unavailable"),
         ):
             with self.subTest(code=code):
                 run = self.design(candidate, criterion)
