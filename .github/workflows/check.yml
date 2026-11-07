@@ -76,3 +76,33 @@ jobs:
       - name: Stop the PostgreSQL test server
         if: always()
         run: scripts/test-postgres.sh stop
+  demo:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: wildcat-finance/skills
+          ref: 685158cdc5407ca5559bf9ef4a021d664e764ece
+          fetch-depth: 0
+          path: .skills-source
+          persist-credentials: false
+      - name: Build the pinned validator image
+        env:
+          SKILLS_REPO: .skills-source
+          DOCKER_CONTEXT: default
+          FIAT_VALIDATOR_IMAGE: fiat-checkpoints-validator:ci
+        run: scripts/sandbox-env.sh build
+      - name: Start the pinned PostgreSQL 16 test server
+        run: scripts/test-postgres.sh start
+      - name: Demonstrate intake to validation in the validator image
+        env:
+          DOCKER_CONTEXT: default
+          FIAT_VALIDATOR_IMAGE: fiat-checkpoints-validator:ci
+        run: scripts/sandbox-env.sh run scripts/demo.sh --scenario intake-validation --profile local
+      - name: Stop the PostgreSQL test server
+        if: always()
+        run: scripts/test-postgres.sh stop
