@@ -262,6 +262,12 @@ class HandoffDocumentTests(unittest.TestCase):
         digest = re.search(r"evidence_sha256` is\s+`([0-9a-f]{64})`", self.text).group(1)
         self.assertEqual(hashlib.sha256(canonical(example)).hexdigest(), digest)
 
+    def test_a_validation_protocol_code_is_placed_where_the_service_emits_it(self):
+        # S7-R1-04: the status route returns `code` alone; only the event carries `protocol_code`.
+        rows = {row[0]: row for row in table(section(self.text, "### Validation outcomes"))}
+        self.assertIn("the `validation-finished` event names it as `protocol_code`", rows["protocol_refused"][2])
+        self.assertIn("the status route does not", rows["protocol_refused"][2])
+
     def test_every_evidence_field_and_coverage_flag_is_described(self):
         fields = table(section(self.text, "### Evidence fields"))
         self.assertEqual([row[0] for row in fields], sorted(self.example))

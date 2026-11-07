@@ -570,7 +570,7 @@ retried one keeps its phase and shows no code but `retry_after_seconds: 30`;
 
 | Code | Candidate | When |
 | --- | --- | --- |
-| `protocol_refused` | rejected | A native stage refused with a class the release lists for it; `protocol_code` names it |
+| `protocol_refused` | rejected | A native stage refused with a class the release lists for it; the `validation-finished` event names it as `protocol_code`, and the status route does not |
 | `identity_mismatch` | rejected | The archive is not the announced one, or the reminted identity differs |
 | `signer_not_enrolled` | rejected | A commit signer is outside the approved keys |
 | `endorsement_invalid` | rejected | The uploader's grant is no longer current |
