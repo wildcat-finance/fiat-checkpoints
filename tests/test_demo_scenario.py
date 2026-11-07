@@ -421,15 +421,15 @@ def images(environ=None):
 
 def run_scenario(sandbox=None):
     """Run every case once and return the report; a broken precondition raises `DemoRefusal`."""
-    seen = images()
+    image_ids = images()
     sandbox = Sandbox() if sandbox is None else sandbox
     with ExitStack() as stack:
         service = Service(stack)
         stack.callback(service.stop)
-        return _scenario(service, sandbox, seen)
+        return _scenario(service, sandbox, image_ids)
 
 
-def _scenario(service, sandbox, seen):
+def _scenario(service, sandbox, image_ids):
     release, value = service.release, service.value
     archive = fixture.valid_archive(release)
     valid = identities_of(value, archive)
@@ -532,17 +532,17 @@ def _scenario(service, sandbox, seen):
         "accepted": service.count("SELECT count(*) FROM candidates WHERE state = 'accepted'"),
         "publish_jobs": service.count("SELECT count(*) FROM outbox_jobs WHERE kind = 'publish-intent'"),
     }
-    return report(service, cases, restart, authority, evidence, archive, seen)
+    return report(service, cases, restart, authority, evidence, archive, image_ids)
 
 
-def report(service, cases, restart, authority, evidence, archive, seen):
+def report(service, cases, restart, authority, evidence, archive, image_ids):
     release = service.release
     decoded = None if evidence is None else json.loads(evidence)
     result = {
         "schema": SCHEMA, "scenario": "intake-validation", "profile": "local",
         "source": source_digest(), "runtime": runtime(),
         "release": {"lock_sha256": release.lock_sha256, "trees_sha256": release.trees_sha256},
-        "pins": pins.record(), "images": dict(seen),
+        "pins": pins.record(), "images": dict(image_ids),
         "fixture": {"outer_sha256": hashlib.sha256(archive).hexdigest(), "bytes": len(archive),
                     "snapshot_id": service.value["snapshot_id"]},
         "cases": cases, "restart": restart, "authority": authority,
