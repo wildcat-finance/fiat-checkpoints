@@ -137,14 +137,14 @@ independent signer is also issue #2's.
 ## Example intent
 
 Built by the demonstration from the released valid fixture and synthetic keys
-on 2026-11-06. The row's `evidence_sha256` is
-`f29b09378a5fda51cb42f838606626e3c0f4e230d47e81876822397d13971aba`.
+on 2026-11-07. The row's `evidence_sha256` is
+`b893731183ec741739c83daf5513c154d0b7088380a3562679b9fb6e0cdef48b`.
 The block below is the same record with indentation; its canonical form is
 the stored bytes.
 
 ```json
 {
-  "candidate_id": "7d9cf02962094d2e8de3070ba15ed539",
+  "candidate_id": "c37a9e29a0f9478ca4b8607162a641af",
   "coverage": {
     "accepted": false,
     "commit_signature_coverage": true,
@@ -162,9 +162,9 @@ the stored bytes.
     "verify_observations": true
   },
   "endorsement": {
-    "enrollment_sha256": "1ecbb3e2909187019a47b3bb40e3f9d0a6704459f0e1b792f1a6786b763ab9a6",
-    "envelope_sha256": "b780992559dad8740ff0e5aca9cf83b64291f1558e7300351f3611d8dfa65902",
-    "grant_sha256": "797bba1ac79e33174687d2491c2e8808c88934acb4fd45a3a61213400968a444",
+    "enrollment_sha256": "e9c684f93a37a35777b4076f1354848106460877784e59e1cd12ec7c7fa6fe4e",
+    "envelope_sha256": "c215116188cd095632447101ee99cedc45a4a796c0cf76e36a3f1f8d8c502495",
+    "grant_sha256": "e492d5e7e314f0b3f0e555be5e52288244fba7568c06a3fa5fe1970a343a55c1",
     "sequence": 1
   },
   "fence": 2,
@@ -179,7 +179,7 @@ the stored bytes.
     "length": 59603,
     "upload_attempt": 1
   },
-  "job_id": "26c412c1628a874244de7a3508eca356",
+  "job_id": "d4046ed1f714ae36987c3496035bd441",
   "native_result": {
     "complete": true,
     "coverage": {
@@ -350,7 +350,7 @@ the stored bytes.
     "native_results": [
       {
         "attempt_id": "attempt-1-2",
-        "duration_ms": 13329,
+        "duration_ms": 9418,
         "exit": 0,
         "input_sha256": "56e76497927756bdcb1658dae79a4babcb7c0c00c580c306773a189af7bbe95e",
         "log_bytes": 0,
@@ -361,18 +361,18 @@ the stored bytes.
       },
       {
         "attempt_id": "attempt-1-2",
-        "duration_ms": 41557,
+        "duration_ms": 28757,
         "exit": 0,
         "input_sha256": "56e76497927756bdcb1658dae79a4babcb7c0c00c580c306773a189af7bbe95e",
         "log_bytes": 0,
         "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "output_bytes": 1545,
-        "output_sha256": "83d69fb0473e25a1398dcb3e6fbe68432d72276000a889de1064d4ae2b3171f2",
+        "output_sha256": "416af618ecd7d4c5703f6e27f0b8df12afe18fdf1d9d3a4a65faa49774dbbdf4",
         "stage": "restore"
       },
       {
         "attempt_id": "attempt-1-2",
-        "duration_ms": 32580,
+        "duration_ms": 20882,
         "exit": 0,
         "input_sha256": "56e76497927756bdcb1658dae79a4babcb7c0c00c580c306773a189af7bbe95e",
         "log_bytes": 0,
@@ -383,7 +383,7 @@ the stored bytes.
       },
       {
         "attempt_id": "attempt-1-2",
-        "duration_ms": 36267,
+        "duration_ms": 22827,
         "exit": 0,
         "input_sha256": "56e76497927756bdcb1658dae79a4babcb7c0c00c580c306773a189af7bbe95e",
         "log_bytes": 0,
@@ -408,7 +408,7 @@ the stored bytes.
     "public_trust_sha256": "53cdca6e6619914a2fecf91e42677897f784a0dd8857a4b2ceb2a36370d59ed5",
     "request": {
       "attempt_id": "attempt-1-2",
-      "candidate_id": "7d9cf02962094d2e8de3070ba15ed539",
+      "candidate_id": "c37a9e29a0f9478ca4b8607162a641af",
       "carrier_length": 59603,
       "controller_manifest_sha256": "b437779ea4e4745db9a3bcf3f4f6c3e2a5f937918f0b6c5812914d136516f8b6",
       "lease_id": "lease-2",
@@ -416,7 +416,7 @@ the stored bytes.
       "snapshot_id": "21af06cacb59d1b2958b67db63dbdeac18d68b1987f9f10266c6ed47157f2245"
     },
     "resources": {
-      "duration_ms": 175648,
+      "duration_ms": 103275,
       "input_bytes": 59603,
       "output_bytes": 4158
     },
@@ -444,7 +444,7 @@ the stored bytes.
       }
     ]
   },
-  "native_result_sha256": "a79314430215b1318a937f7e0bacabce91cdd22bf330f290eb7798cf8281a539",
+  "native_result_sha256": "6fab4053cda200a6a2315f13ed9b410cd573ea27ae4780b13f456c3b66ae2585",
   "parent": {
     "sha256": "5555555555555555555555555555555555555555555555555555555555555555",
     "type": "parent-link"
@@ -497,17 +497,17 @@ the stored bytes.
       }
     ]
   },
-  "registration_sha256": "307990d7eb2723629cfbff06c76b0288b3de9e7eee001b99ed88e8d636a4f00f",
+  "registration_sha256": "3c744ae79152016ab1b21bf71b155fea77f65718e8300b67591ec4b23304cb87",
   "release": {
     "lock_sha256": "2fb8ba52d22c1d66e3bd1f70b4ab4af79ff0666fcc8ac5594dce4cdd3df7f49e",
     "trees_sha256": "43ef8e0ff615f1b7e7d972d1c461f48ba859172fd25515725a5b0f6494061697"
   },
   "resources": {
-    "cpu_us": 261151953,
-    "memory_peak_bytes": 144121856,
+    "cpu_us": 147564669,
+    "memory_peak_bytes": 143495168,
     "oom_kills": 0,
-    "pids_peak": 39,
-    "wall_ms": 202213
+    "pids_peak": 38,
+    "wall_ms": 116074
   },
   "schema": "fiat-checkpoints-validation-evidence/v1",
   "started_at": "2026-09-30T12:00:00+00:00",
@@ -523,7 +523,7 @@ the stored bytes.
   },
   "trust_head": {
     "count": 11,
-    "tail": "307990d7eb2723629cfbff06c76b0288b3de9e7eee001b99ed88e8d636a4f00f"
+    "tail": "3c744ae79152016ab1b21bf71b155fea77f65718e8300b67591ec4b23304cb87"
   },
   "validation_attempt": 1
 }
