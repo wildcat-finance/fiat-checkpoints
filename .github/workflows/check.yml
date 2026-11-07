@@ -96,12 +96,16 @@ jobs:
           DOCKER_CONTEXT: default
           FIAT_VALIDATOR_IMAGE: fiat-checkpoints-validator:ci
         run: scripts/sandbox-env.sh build
+      # The demonstration records the test image id too, and refuses without it.
+      - name: Build the pinned test image
+        run: docker build --platform linux/amd64 -f containers/test.Dockerfile -t fiat-checkpoints-test:ci .
       - name: Start the pinned PostgreSQL 16 test server
         run: scripts/test-postgres.sh start
       - name: Demonstrate intake to validation in the validator image
         env:
           DOCKER_CONTEXT: default
           FIAT_VALIDATOR_IMAGE: fiat-checkpoints-validator:ci
+          FIAT_TEST_IMAGE: fiat-checkpoints-test:ci
         run: scripts/sandbox-env.sh run scripts/demo.sh --scenario intake-validation --profile local
       - name: Stop the PostgreSQL test server
         if: always()

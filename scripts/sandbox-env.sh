@@ -5,6 +5,11 @@
 #   scripts/sandbox-env.sh facts        print kernel, image id and the runsc pin
 #   scripts/sandbox-env.sh run CMD...   run CMD as the supervisor at this checkout
 #
+# A run passes the validator, test and PostgreSQL image ids in as
+# FIAT_IMAGE_VALIDATOR, FIAT_IMAGE_TEST and FIAT_IMAGE_POSTGRES, because a
+# container cannot read its own image id; an absent image passes an empty value.
+# FIAT_TEST_IMAGE names the test image (default fiat-checkpoints-test:local).
+#
 # The supervisor starts gVisor `runsc`, so it runs as root in a privileged
 # container on the same colima profile as scripts/linux-env.sh. That container
 # has no network and a read-only root, so the protocol trees are unwritable even
@@ -18,7 +23,9 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
 GIT_COMMON=$(git -C "$ROOT" rev-parse --path-format=absolute --git-common-dir)
 CONTEXT=${DOCKER_CONTEXT:-colima-$PROFILE}
 IMAGE=${FIAT_VALIDATOR_IMAGE:-fiat-checkpoints-validator:local}
+TEST_IMAGE=${FIAT_TEST_IMAGE:-fiat-checkpoints-test:local}
 POSTGRES_VOLUME=fiat-checkpoints-postgres-socket
+POSTGRES_CONTAINER=fiat-checkpoints-postgres
 NATIVE_COMMIT=1d4e4eebcba1825d0eb3192bf08a6c509bdc0d74
 
 refuse() {
@@ -50,9 +57,15 @@ case "${1:-}" in
   run)
     shift
     [ "$#" -gt 0 ] || refuse command-missing
+    VALIDATOR_ID=$(docker --context "$CONTEXT" image inspect --format '{{.Id}}' "$IMAGE" 2>/dev/null || true)
+    TEST_ID=$(docker --context "$CONTEXT" image inspect --format '{{.Id}}' "$TEST_IMAGE" 2>/dev/null || true)
+    POSTGRES_ID=$(docker --context "$CONTEXT" container inspect --format '{{.Image}}' "$POSTGRES_CONTAINER" \
+      2>/dev/null || true)
     exec docker --context "$CONTEXT" run --rm --platform linux/amd64 --network none \
       --privileged --cgroupns private --read-only --tmpfs /tmp:rw,exec,size=1g \
       --tmpfs /run:rw,size=2g --env HOME=/tmp \
+      --env FIAT_IMAGE_VALIDATOR="$VALIDATOR_ID" --env FIAT_IMAGE_TEST="$TEST_ID" \
+      --env FIAT_IMAGE_POSTGRES="$POSTGRES_ID" \
       --env FIAT_TEST_POSTGRES=/run/fiat-postgres --volume "$POSTGRES_VOLUME:/run/fiat-postgres" \
       --volume "$ROOT:$ROOT" --volume "$GIT_COMMON:$GIT_COMMON:ro" \
       --workdir "$ROOT" "$IMAGE" /bin/sh -c '
