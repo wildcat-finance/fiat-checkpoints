@@ -110,3 +110,74 @@ jobs:
       - name: Stop the PostgreSQL test server
         if: always()
         run: scripts/test-postgres.sh stop
+  # The native-sequence-linux design criterion: the released native criterion in
+  # the test-only criterion image, natively on this x86_64 runner. Its report is
+  # the uploaded artifact; the job fails unless the report's value is true.
+  criterion:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      DOCKER_CONTEXT: default
+      SKILLS_REPO: .skills-source
+      FIAT_VALIDATOR_IMAGE: fiat-checkpoints-validator:ci
+      FIAT_CRITERION_IMAGE: fiat-checkpoints-criterion:ci
+      REPORT: .hexaemeron/design/reports/isolated-pinned-runtime-native-sequence-linux.json
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      # Full history, so the native commit 1d4e4eeb the criterion pins is reachable.
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: wildcat-finance/skills
+          ref: 685158cdc5407ca5559bf9ef4a021d664e764ece
+          fetch-depth: 0
+          path: .skills-source
+          persist-credentials: false
+      - name: Check that both criterion commits are present
+        run: >-
+          git -C .skills-source cat-file -e 685158cdc5407ca5559bf9ef4a021d664e764ece^{commit} &&
+          git -C .skills-source cat-file -e 1d4e4eebcba1825d0eb3192bf08a6c509bdc0d74^{commit}
+      - name: Build the pinned validator image
+        run: scripts/sandbox-env.sh build
+      - name: Build the test-only criterion image
+        run: scripts/sandbox-env.sh criterion-build
+      - name: Run the released native criterion in the criterion image
+        env:
+          FIAT_SANDBOX_IMAGE: criterion
+        # The exit is kept for the log and the last step rather than ending the job here.
+        run: |
+          set +e
+          scripts/sandbox-env.sh run python3 scripts/check.py design \
+            --candidate isolated-pinned-runtime --criterion native-sequence-linux --out "$REPORT" \
+            > criterion.stdout 2> criterion.stderr
+          echo "design-exit=$?" > criterion.exit
+      - name: Record the runner, the images and the criterion's counters
+        if: always()
+        run: |
+          mkdir -p native-sequence-linux
+          {
+            echo "kernel=$(uname -r)"
+            echo "machine=$(uname -m)"
+            echo "cpu=$(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2- | sed 's/^ //')"
+            echo "cpus=$(nproc)"
+            echo "runsc=$(docker run --rm --network none "$FIAT_CRITERION_IMAGE" /opt/fiat-checkpoints/gvisor/runsc --version | head -1)"
+            echo "validator_image=$(docker image inspect --format '{{.Id}}' "$FIAT_VALIDATOR_IMAGE")"
+            echo "criterion_image=$(docker image inspect --format '{{.Id}}' "$FIAT_CRITERION_IMAGE")"
+            cat criterion.exit
+            echo "--- design stdout"; cat criterion.stdout
+            echo "--- design stderr (the native-criterion-finished event carries the counters)"; cat criterion.stderr
+          } > native-sequence-linux/native-sequence-linux.log 2>&1 || true
+          # The launcher's container runs as root and writes the report 0600.
+          sudo cp "$REPORT" native-sequence-linux/ && sudo chown "$(id -u):$(id -g)" native-sequence-linux/* || true
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: native-sequence-linux-report
+          path: native-sequence-linux/
+          if-no-files-found: error
+      - name: Require a true report
+        run: >-
+          grep -qx 'design-exit=0' criterion.exit &&
+          python3 -c "import json, sys; sys.exit(0 if json.load(open(sys.argv[1]))['value'] is True else 1)"
+          native-sequence-linux/isolated-pinned-runtime-native-sequence-linux.json

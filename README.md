@@ -164,6 +164,26 @@ FIAT_LINUX_PROFILE=latency scripts/linux-env.sh run python3 scripts/latency.py -
 It prints every sample and exits 0 only when all 80 metadata requests were
 answered and their p95 is at most 500 ms. Run it on a quiet host.
 
+The `native-sequence-linux` design criterion runs the released native
+criterion itself: Skills' `checkpoint_authority_native_corpus.py --check` and
+`checkpoint_authority_conformance.py --criterion native-boundary-coverage`. It
+runs in a gVisor job in a test-only criterion image built from the validator
+image. That image adds only the criterion's files, each pinned by SHA-256 in
+`containers/criterion.sha256`, and gpg-agent at a pinned Debian version and
+digest; the production validator image is unchanged. The `criterion` job in
+`.github/workflows/check.yml` runs it natively on a hosted x86_64 runner and
+uploads the report as the `native-sequence-linux-report` artifact, because the
+emulated local profile cannot finish it inside the criterion's own 1,800 s
+limit. The same commands, on a native x86_64 Linux host:
+
+```sh
+SKILLS_REPO=<skills clone> scripts/sandbox-env.sh build
+SKILLS_REPO=<skills clone> scripts/sandbox-env.sh criterion-build
+FIAT_SANDBOX_IMAGE=criterion scripts/sandbox-env.sh run python3 scripts/check.py design \
+  --candidate isolated-pinned-runtime --criterion native-sequence-linux \
+  --out .hexaemeron/design/reports/isolated-pinned-runtime-native-sequence-linux.json
+```
+
 The [intent handoff](docs/intent-handoff.md) gives issue #2 the intent
 contract, an example intent and every stable refusal.
 
