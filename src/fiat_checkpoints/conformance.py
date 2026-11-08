@@ -232,11 +232,33 @@ def _criterion_policy():
     return CriterionPolicy(cpu_seconds=CRITERION_CPU_SECONDS, wall_seconds=CRITERION_WALL_SECONDS)
 
 
+# The criterion's released test harness writes a fake `gh` to its temporary
+# directory and runs it. Ruled by the driver under Laurence's delegation of
+# 2026-11-08: the criterion job, test-only and never a validation job, may
+# execute files on its own scratch. Every validation job keeps the exact mounts.
+EXEC_SCRATCH = ("/job", "/tmp")
+
+
+def _criterion_sandbox(policy):
+    """The validation sandbox with `noexec` dropped from the `/job` and `/tmp` tmpfs mounts, and nothing else."""
+    from fiat_checkpoints.validation.sandbox import Sandbox
+
+    class CriterionSandbox(Sandbox):
+        def oci_config(self, job, job_id, directory):
+            config = super().oci_config(job, job_id, directory)
+            for mount in config["mounts"]:
+                if mount["type"] == "tmpfs" and mount["destination"] in EXEC_SCRATCH:
+                    mount["options"] = [option for option in mount["options"] if option != "noexec"]
+            return config
+
+    return CriterionSandbox(policy)
+
+
 def _criterion_run():
     """One fresh gVisor job running the released criterion: the `SandboxRun` and the driver's summary."""
     from fiat_checkpoints.validation import pins
-    from fiat_checkpoints.validation.sandbox import Sandbox, SandboxJob
-    sandbox = Sandbox(_criterion_policy())
+    from fiat_checkpoints.validation.sandbox import SandboxJob
+    sandbox = _criterion_sandbox(_criterion_policy())
     sandbox.check()
     run = sandbox.run(SandboxJob(
         owner="design-native-boundary-coverage", trust=b"{}",

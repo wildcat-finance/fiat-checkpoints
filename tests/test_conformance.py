@@ -19,6 +19,7 @@ from unittest import mock
 
 from fiat_checkpoints import conformance
 from fiat_checkpoints.validation import outputs
+from fiat_checkpoints.validation.policy import ResourcePolicy
 from fiat_checkpoints.validation.refusals import ValidationRefusal
 from fiat_checkpoints.validation.sandbox import SandboxRun
 from tests.validation_support import expected, library, native_record, release, result_line, run_of
@@ -199,6 +200,44 @@ class NativeCriterionTests(unittest.TestCase):
                           event["read_error"]), ("native-criterion-finished", 2, "native-execution-unavailable",
                                                  {"file": "report", "type": "FileNotFoundError"}))
         self.assertIs(event["summary_parsed"], True)
+
+    def specs(self):
+        from fiat_checkpoints.validation.sandbox import Sandbox, SandboxJob
+        job = SandboxJob(owner="spec", argv=("/usr/local/bin/python3.14", "-I", "-c", "pass"), trust=b"{}",
+                         binds=((Path("/host/service"), "/opt/fiat-checkpoints/service/src"),))
+        production = Sandbox().oci_config(job, "a" * 32, Path("/state/job"))
+        criterion = self.helper("_criterion_sandbox")(
+            self.helper("_criterion_policy")()).oci_config(job, "a" * 32, Path("/state/job"))
+        return production, criterion
+
+    def test_validation_jobs_keep_noexec_scratch_and_noexec_input_and_trust(self):
+        production, _criterion = self.specs()
+        mounts = {mount["destination"]: mount for mount in production["mounts"]}
+        for destination in ("/job", "/tmp", "/input/checkpoint.zip", "/trust/job.json"):
+            with self.subTest(destination=destination):
+                self.assertIn("noexec", mounts[destination]["options"])
+                self.assertIn("nosuid", mounts[destination]["options"])
+        self.assertEqual(mounts["/opt/fiat-checkpoints/service/src"]["options"], ["rbind", "ro", "nosuid", "nodev"])
+
+    def test_the_criterion_job_differs_only_by_exec_on_its_scratch(self):
+        # Ruled by the driver under Laurence's delegation of 2026-11-08.
+        production, criterion = self.specs()
+        # The only other difference is the criterion policy's CPU limit (wall time is not in the spec).
+        for spec, limits in ((production, ResourcePolicy()), (criterion, self.helper("_criterion_policy")())):
+            [cpu] = [row for row in spec["process"]["rlimits"] if row["type"] == "RLIMIT_CPU"]
+            self.assertEqual((cpu["soft"], cpu["hard"]), (limits.cpu_seconds, limits.cpu_seconds))
+            spec["process"]["rlimits"].remove(cpu)
+        changed = []
+        for before, after in zip(production["mounts"], criterion["mounts"]):
+            if before != after:
+                changed.append(after["destination"])
+                self.assertEqual([option for option in before["options"] if option != "noexec"], after["options"])
+                self.assertEqual({key: value for key, value in before.items() if key != "options"},
+                                 {key: value for key, value in after.items() if key != "options"})
+        self.assertEqual(changed, ["/job", "/tmp"])
+        for spec in (production, criterion):
+            spec.pop("mounts")
+        self.assertEqual(production, criterion)
 
     def test_the_criterion_policy_raises_only_cpu_and_wall_for_this_job(self):
         from fiat_checkpoints.validation.policy import SPECIFICATION, ResourcePolicy
