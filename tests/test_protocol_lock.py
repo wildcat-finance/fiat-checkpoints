@@ -1,5 +1,6 @@
 """The shipped lock, the read-only trees and production startup without them."""
 
+import contextlib
 from dataclasses import replace
 import importlib.util
 import json
@@ -204,6 +205,35 @@ class StartupTests(unittest.TestCase):
         self.assertEqual(emitted, set(PROTOCOL_CODES))
 
 
+# The validator image's unprivileged user.
+IMAGE_USER = 65532
+
+
+@contextlib.contextmanager
+def image_user(base):
+    """Load as the image's unprivileged user when the suite runs as root.
+
+    Under `scripts/sandbox-env.sh run` the suite is root, so every copied file
+    is writable to it and the loader refuses `protocol-tree-writable` before the
+    check a test names. `os.access` reads the real ids, so the real and
+    effective ids both drop; the saved id stays 0 to restore them.
+    """
+    if os.geteuid() != 0:
+        yield
+        return
+    os.chmod(base, 0o755)
+    uids, gids, groups = os.getresuid(), os.getresgid(), os.getgroups()
+    os.setgroups([])
+    os.setresgid(IMAGE_USER, IMAGE_USER, gids[2])
+    os.setresuid(IMAGE_USER, IMAGE_USER, uids[2])
+    try:
+        yield
+    finally:
+        os.setresuid(*uids)
+        os.setresgid(*gids)
+        os.setgroups(groups)
+
+
 class TreeCustodyTests(unittest.TestCase):
     """Each substitution in a copied tree refuses before the service trusts it."""
 
@@ -218,13 +248,14 @@ class TreeCustodyTests(unittest.TestCase):
 
     def refusal(self, trees=None):
         fixtures.make_read_only(self.trees)
-        with self.assertRaises(RecordRefusal) as caught:
+        with self.assertRaises(RecordRefusal) as caught, image_user(self.base):
             load_release(ROOT, trees or self.trees)
         return caught.exception
 
     def test_read_only_copy_loads(self):
         fixtures.make_read_only(self.trees)
-        release = load_release(ROOT, self.trees)
+        with image_user(self.base):
+            release = load_release(ROOT, self.trees)
         self.assertEqual(release.lock_check["code"], "lock-agrees")
 
     def test_writable_tree_refuses(self):
@@ -257,7 +288,8 @@ class TreeCustodyTests(unittest.TestCase):
             "<III", 0, int(stat_result.st_mtime) & 0xFFFFFFFF, stat_result.st_size & 0xFFFFFFFF)
             + marshal.dumps(code))
         fixtures.make_read_only(self.trees)
-        release = load_release(ROOT, self.trees)
+        with image_user(self.base):
+            release = load_release(ROOT, self.trees)
         self.assertEqual(release.lock_check["code"], "lock-agrees")
         self.assertFalse(hasattr(release.library.canonical, "PLANTED"))
         self.assertEqual(sys.pycache_prefix, str(prefix))

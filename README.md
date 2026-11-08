@@ -125,6 +125,68 @@ counter report and runs only tests that start no child process.
 resolver is registered in `src/fiat_checkpoints/conformance.py`, and refuses
 any other.
 
+## Demonstrate
+
+`scripts/demo.sh` runs issue #1's intake path on this machine over HTTP on
+loopback: login through an in-process identity provider, announce, a signed
+upload endorsement, the upload gateway, PostgreSQL 16 and the pinned gVisor
+validator. It starts gVisor, so it runs in the validator image with the test
+server up:
+
+```sh
+scripts/linux-env.sh db-start
+scripts/sandbox-env.sh run scripts/demo.sh --scenario intake-validation --profile local
+```
+
+It prints one JSON report and its SHA-256. It exits 0 only when one authorized
+upload yields one exact publication intent and each of a wrong actor, changed
+bytes, a forged carried identity, a revoked scope and unavailable isolation
+yields none. Every key, record and archive in it is synthetic; `--out <path>`
+also writes the report. Every group, including the demonstration's, runs in
+the same image:
+
+```sh
+scripts/sandbox-env.sh run python3 scripts/check.py --group all
+```
+
+The metadata latency gate runs on a second, native aarch64 profile, because
+the x86_64 profile above is emulated. `FIAT_LINUX_PROFILE=latency` points
+`scripts/linux-env.sh` at the colima profile `fiat-s862a-arm` (vz, no
+emulation) and its image from `containers/latency.Dockerfile`:
+
+```sh
+FIAT_LINUX_PROFILE=latency scripts/linux-env.sh start
+SKILLS_REPO=<skills clone> FIAT_LINUX_PROFILE=latency scripts/linux-env.sh build
+FIAT_LINUX_PROFILE=latency scripts/linux-env.sh db-start
+FIAT_LINUX_PROFILE=latency scripts/linux-env.sh run python3 scripts/latency.py --profile arm64-native
+```
+
+It prints every sample and exits 0 only when all 80 metadata requests were
+answered and their p95 is at most 500 ms. Run it on a quiet host.
+
+The `native-sequence-linux` design criterion runs the released native
+criterion itself: Skills' `checkpoint_authority_native_corpus.py --check` and
+`checkpoint_authority_conformance.py --criterion native-boundary-coverage`. It
+runs in a gVisor job in a test-only criterion image built from the validator
+image. That image adds only the criterion's files, each pinned by SHA-256 in
+`containers/criterion.sha256`, and gpg-agent at a pinned Debian version and
+digest; the production validator image is unchanged. The `criterion` job in
+`.github/workflows/check.yml` runs it natively on a hosted x86_64 runner and
+uploads the report as the `native-sequence-linux-report` artifact, because the
+emulated local profile cannot finish it inside the criterion's own 1,800 s
+limit. The same commands, on a native x86_64 Linux host:
+
+```sh
+SKILLS_REPO=<skills clone> scripts/sandbox-env.sh build
+SKILLS_REPO=<skills clone> scripts/sandbox-env.sh criterion-build
+FIAT_SANDBOX_IMAGE=criterion scripts/sandbox-env.sh run python3 scripts/check.py design \
+  --candidate isolated-pinned-runtime --criterion native-sequence-linux \
+  --out .hexaemeron/design/reports/isolated-pinned-runtime-native-sequence-linux.json
+```
+
+The [intent handoff](docs/intent-handoff.md) gives issue #2 the intent
+contract, an example intent and every stable refusal.
+
 ## Records
 
 The [adopted specification](docs/specification.md) is kept byte for byte, and

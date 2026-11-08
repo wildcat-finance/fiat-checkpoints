@@ -259,12 +259,16 @@ class DesignModeTests(SyntheticRoot):
             ("isolated-pinned-runtime", "unknown-criterion", "design-criterion-unknown"),
             ("isolated-pinned-runtime", "validator-isolated", "design-criterion-selection-only"),
             ("in-process-validation", "protocol-lock-shipped", "design-candidate-not-selected"),
-            ("isolated-pinned-runtime", "native-sequence-linux", "design-criterion-unavailable"),
         ):
             with self.subTest(code=code):
                 run = self.design(candidate, criterion)
                 self.assertEqual(run.returncode, 2)
                 self.assertIn("checks-refused: " + code, run.stderr)
+        # A known criterion with no registered resolver still refuses (S7-R1-02).
+        (self.root / "src/fiat_checkpoints/conformance.py").write_text(SYNTHETIC_RESOLVERS)
+        run = self.design("isolated-pinned-runtime", "native-sequence-linux")
+        self.assertEqual(run.returncode, 2)
+        self.assertIn("checks-refused: design-criterion-unavailable", run.stderr)
         self.assertFalse((self.root / ".hexaemeron").exists())
 
     def test_design_mode_refuses_mixed_or_missing_options(self):
