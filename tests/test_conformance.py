@@ -6,13 +6,16 @@ isolation; the measurements themselves run in `tests/test_performance.py`,
 the `sandbox` group and the design commands.
 """
 
+import hashlib
 import importlib.util
 from pathlib import Path
+import shutil
+import tempfile
 import unittest
 from unittest import mock
 
 from fiat_checkpoints import conformance
-from fiat_checkpoints.validation import fixture, outputs
+from fiat_checkpoints.validation import outputs
 from fiat_checkpoints.validation.refusals import ValidationRefusal
 from fiat_checkpoints.validation.sandbox import SandboxRun
 from tests.validation_support import expected, library, native_record, release, result_line, run_of
@@ -57,48 +60,146 @@ class RegistryTests(unittest.TestCase):
             self.assertTrue(callable(conformance.RESOLVERS[criterion]))
 
 
-class NativeSequenceTests(unittest.TestCase):
-    def resolve(self, outcome, groups, *, linux=True, killed=None):
-        run = SandboxRun("0" * 32, 0, b"", "0" * 64, 0, killed, {"wall_ms": 1})
-        with mock.patch.object(conformance, "_linux_x86_64", return_value=linux), \
-                mock.patch.object(conformance, "_native_valid_fixture", return_value=(release(), (outcome, run))):
-            return conformance.native_sequence_linux(context("native-sequence-linux", groups))
+def clean_summary(**changes):
+    """The driver's summary of a complete passing criterion run, with `changes` applied."""
+    execution = {"complete": True, "passed": True, "tests_run": 74, "subtests_run": 38, "failures": 0,
+                 "errors": 0, "skips": 0, "expected_failures": 0, "unexpected_successes": 0}
+    summary = {"corpus_exit": 0, "criterion_exit": 0, "code": "cases-passed", "complete": True,
+               "runner_exit": 0, "executed": 74, "native": True, "report_sha256": "0" * 64,
+               "report": {"schema": "protasis-design-report/v1", "candidate": "ordered-replay",
+                          "criterion": "native-boundary-coverage", "value": True, "unit": "boolean", "exit": 0},
+               "execution": execution}
+    for key, value in changes.items():
+        if key in execution:
+            execution[key] = value
+        else:
+            summary[key] = value
+    return summary
 
-    def test_a_complete_sequence_and_a_passing_sandbox_group_hold(self):
+
+def sandbox_run(exit=0, killed=None):
+    return SandboxRun("0" * 32, exit, b"", "0" * 64, 0, killed, {"wall_ms": 1, "cpu_us": 1})
+
+
+class NativeCriterionTests(unittest.TestCase):
+    """S7-R1-01: the resolver runs the released criterion, never a substitute."""
+
+    def helper(self, name):
+        # A missing helper fails as an assertion, so the substitute resolver fails here too.
+        self.assertTrue(hasattr(conformance, name), name)
+        return getattr(conformance, name)
+
+    def test_absent_criterion_files_refuse_even_where_the_substitute_passed(self):
+        # The pre-round-3 resolver returned true here from one valid-fixture job
+        # and the sandbox group; the released criterion was never in the image.
         groups = Groups()
-        self.assertIs(self.resolve(evidence(), groups), True)
-        self.assertEqual(groups.calls, [("sandbox",)])
-
-    def test_the_sandbox_group_failing_refuses(self):
-        self.assertIs(self.resolve(evidence(), Groups(False)), False)
-
-    def test_a_refused_job_a_kill_or_another_host_refuses_before_the_groups(self):
-        for outcome, options in ((ValidationRefusal("validation_failed", "sandbox-memory-limit"), {}),
-                                 (evidence(), {"killed": "memory-limit"}),
-                                 (evidence(), {"linux": False})):
-            with self.subTest(options=options, outcome=type(outcome).__name__):
-                groups = Groups()
-                self.assertIs(self.resolve(outcome, groups, **options), False)
-                self.assertEqual(groups.calls, [])
-
-    def test_an_unavailable_sandbox_refuses(self):
-        groups = Groups()
-        with mock.patch.object(conformance, "_linux_x86_64", return_value=True), \
-                mock.patch.object(conformance, "_native_valid_fixture",
-                                  side_effect=ValidationRefusal("sandbox_unavailable", "sandbox-runtime-missing")):
+        run = SandboxRun("0" * 32, 0, b"", "0" * 64, 0, None, {"wall_ms": 1})
+        with tempfile.TemporaryDirectory() as temporary, \
+                mock.patch.object(conformance, "_linux_x86_64", return_value=True), \
+                mock.patch.object(conformance, "CRITERION_LIST", Path(temporary) / "absent.sha256", create=True), \
+                mock.patch.object(conformance, "_native_valid_fixture", create=True,
+                                  return_value=(release(), (evidence(), run))), \
+                mock.patch.object(conformance, "_criterion_run", create=True,
+                                  side_effect=AssertionError("no job without the criterion")):
             self.assertIs(conformance.native_sequence_linux(context("native-sequence-linux", groups)), False)
         self.assertEqual(groups.calls, [])
 
-    def test_a_result_that_is_not_the_released_fixtures_refuses(self):
-        # The reader binds the result to its request; the resolver also binds it to the fixture.
-        value, public = fixture.released(release())
-        outcome = evidence()
-        for change in ({"snapshot_id": "0" * 64}, {"required": sorted(value["required"])[1:]}):
-            with self.subTest(change=sorted(change)), \
-                    mock.patch.object(fixture, "released", return_value=(value | change, public)):
-                groups = Groups()
-                self.assertIs(self.resolve(outcome, groups), False)
-                self.assertEqual(groups.calls, [])
+    def tree(self, root):
+        base = root / "criterion"
+        rows = []
+        for name, data in (("root/a.py", b"a\n"), ("native-source/b/c.json", b"{}")):
+            (base / name).parent.mkdir(parents=True, exist_ok=True)
+            (base / name).write_bytes(data)
+            rows.append(hashlib.sha256(data).hexdigest() + "  " + name)
+        listing = root / "criterion.sha256"
+        listing.write_text("\n".join(sorted(rows, key=lambda row: row[66:])) + "\n")
+        return listing, base
+
+    def test_the_listed_files_must_be_present_exact_and_alone(self):
+        changes = {
+            "missing": lambda base, listing: (base / "root/a.py").unlink(),
+            "changed": lambda base, listing: (base / "root/a.py").write_bytes(b"b\n"),
+            "extra": lambda base, listing: (base / "root/extra.py").write_bytes(b""),
+            "symlink": lambda base, listing: (base / "root/link.py").symlink_to(base / "root/a.py"),
+            "empty list": lambda base, listing: listing.write_text(""),
+            "bad row": lambda base, listing: listing.write_text("zz  root/a.py\n"),
+            "no list": lambda base, listing: listing.unlink(),
+            "no tree": lambda base, listing: shutil.rmtree(base),
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            listing, base = self.tree(Path(temporary))
+            self.assertIs(self.helper("_criterion_files")(listing, base), True)
+        for name, change in changes.items():
+            with self.subTest(change=name), tempfile.TemporaryDirectory() as temporary:
+                listing, base = self.tree(Path(temporary))
+                change(base, listing)
+                self.assertIs(self.helper("_criterion_files")(listing, base), False)
+
+    def test_only_a_complete_clean_run_passes(self):
+        self.assertIs(self.helper("_criterion_passed")(sandbox_run(), clean_summary()), True)
+        for name, run, summary in (
+                ("skips", sandbox_run(), clean_summary(skips=35)),
+                ("failure", sandbox_run(), clean_summary(failures=1)),
+                ("error", sandbox_run(), clean_summary(errors=1)),
+                ("not passed", sandbox_run(), clean_summary(passed=False)),
+                ("incomplete", sandbox_run(), clean_summary(complete=False)),
+                ("short", sandbox_run(), clean_summary(tests_run=73)),
+                ("nothing executed", sandbox_run(), clean_summary(executed=0, tests_run=0)),
+                ("no native result", sandbox_run(), clean_summary(native=False)),
+                ("cases failed", sandbox_run(), clean_summary(code="cases-failed")),
+                ("criterion exit", sandbox_run(), clean_summary(criterion_exit=1)),
+                ("manifest drift", sandbox_run(), clean_summary(corpus_exit=1)),
+                ("report false", sandbox_run(), clean_summary(report={"schema": "protasis-design-report/v1",
+                                                                      "criterion": "native-boundary-coverage",
+                                                                      "value": False, "exit": 1})),
+                ("cpu kill", sandbox_run(137, "cpu-limit"), clean_summary()),
+                ("job exit", sandbox_run(1), clean_summary()),
+                ("no summary", sandbox_run(), None)):
+            with self.subTest(case=name):
+                self.assertIs(self.helper("_criterion_passed")(run, summary), False)
+
+    def resolve(self, outcome, *, linux=True, files=True):
+        patches = [mock.patch.object(conformance, "_linux_x86_64", return_value=linux),
+                   mock.patch.object(conformance, "_criterion_files", return_value=files, create=True)]
+        if isinstance(outcome, Exception):
+            patches.append(mock.patch.object(conformance, "_criterion_run", side_effect=outcome, create=True))
+        else:
+            patches.append(mock.patch.object(conformance, "_criterion_run", return_value=outcome, create=True))
+        groups = Groups()
+        with patches[0], patches[1], patches[2] as started, mock.patch("sys.stderr"):
+            value = conformance.native_sequence_linux(context("native-sequence-linux", groups))
+        self.assertEqual(groups.calls, [])
+        return value, started.call_count
+
+    def test_the_resolver_runs_the_criterion_and_reads_only_its_result(self):
+        self.assertEqual(self.resolve((sandbox_run(), clean_summary())), (True, 1))
+        self.assertEqual(self.resolve((sandbox_run(), clean_summary(skips=35))), (False, 1))
+        self.assertEqual(self.resolve(ValidationRefusal("sandbox_unavailable", "sandbox-runtime-missing")), (False, 1))
+        self.assertEqual(self.resolve((sandbox_run(), clean_summary()), linux=False), (False, 0))
+        self.assertEqual(self.resolve((sandbox_run(), clean_summary()), files=False), (False, 0))
+
+    def test_the_criterion_policy_raises_only_cpu_and_wall_for_this_job(self):
+        from fiat_checkpoints.validation.policy import SPECIFICATION, ResourcePolicy
+        policy = self.helper("_criterion_policy")()
+        self.assertIsInstance(policy, ResourcePolicy)
+        expected = ResourcePolicy().record() | {"cpu_seconds": self.helper("CRITERION_CPU_SECONDS"),
+                                                 "wall_seconds": self.helper("CRITERION_WALL_SECONDS")}
+        self.assertEqual(policy.record(), expected)
+        self.assertGreater(self.helper("CRITERION_CPU_SECONDS"), SPECIFICATION.cpu_seconds)
+        self.assertEqual((ResourcePolicy().cpu_seconds, ResourcePolicy().wall_seconds), (300, 900))
+        with self.assertRaises(ValueError):
+            ResourcePolicy(cpu_seconds=self.helper("CRITERION_CPU_SECONDS"))
+
+    def test_the_driver_runs_both_released_commands(self):
+        driver = self.helper("CRITERION_DRIVER")
+        compile(driver, "criterion-driver", "exec")
+        for needle in ("plugins/hexaemeron/tests/checkpoint_authority_native_corpus.py", '"--check"',
+                       "plugins/hexaemeron/tests/checkpoint_authority_conformance.py",
+                       '"--criterion", "native-boundary-coverage"', "CHECKPOINT_AUTHORITY_NATIVE_SOURCE"):
+            with self.subTest(needle=needle):
+                self.assertIn(needle, driver)
+        self.assertEqual(self.helper("CRITERION_REPORT"),
+                         ".hexaemeron/reports/ordered-replay-native-boundary-coverage.json")
 
 
 class HostileSuitesTests(unittest.TestCase):
