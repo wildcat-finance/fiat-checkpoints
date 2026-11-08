@@ -12,7 +12,9 @@
 # 1d4e4eebcba1825d0eb3192bf08a6c509bdc0d74 (the 238-file native profile,
 # scripts/run_observation.py, the two native tests native-capabilities.json pins
 # and the modules they import). The build refuses unless the list is that
-# file, every file matches it and nothing else is present.
+# file, every file matches it and nothing else is present. The launcher builds
+# FROM the validator tag and then refuses the image unless its layers begin with
+# every layer that tag had before the build.
 ARG VALIDATOR_IMAGE=fiat-checkpoints-validator:local
 
 # gpg-agent 2.4.7-21+deb13u1+b4, the version of the image's gpg, from the same

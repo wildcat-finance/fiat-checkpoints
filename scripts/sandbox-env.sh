@@ -63,8 +63,12 @@ case "${1:-}" in
     ;;
   criterion-build)
     [ -n "${SKILLS_REPO:-}" ] || refuse skills-repo-missing
-    VALIDATOR_ID=$(docker --context "$CONTEXT" image inspect --format '{{.Id}}' "$VALIDATOR_IMAGE") \
-      || refuse validator-image-missing
+    # BuildKit reads a bare image id in FROM as a registry name, so the build
+    # names the validator tag, and the result must sit on the layers that tag
+    # had before the build.
+    VALIDATOR_LAYERS=$(docker --context "$CONTEXT" image inspect --format '{{range .RootFS.Layers}}{{println .}}{{end}}' \
+      "$VALIDATOR_IMAGE") || refuse validator-image-missing
+    [ -n "$VALIDATOR_LAYERS" ] || refuse validator-image-missing
     # Each listed file comes from the commit its tree names; the image build
     # checks every digest and refuses any file the list does not name.
     rm -rf "$ROOT/.protocol-trees/criterion" "$ROOT/.protocol-trees/criterion.sha256"
@@ -79,9 +83,19 @@ case "${1:-}" in
         || refuse criterion-file-missing
     done < "$ROOT/containers/criterion.sha256"
     cp "$ROOT/containers/criterion.sha256" "$ROOT/.protocol-trees/criterion.sha256"
-    exec docker --context "$CONTEXT" build --platform linux/amd64 \
-      --build-arg VALIDATOR_IMAGE="$VALIDATOR_ID" \
+    docker --context "$CONTEXT" build --platform linux/amd64 \
+      --build-arg VALIDATOR_IMAGE="$VALIDATOR_IMAGE" \
       -f "$ROOT/containers/criterion.Dockerfile" -t "$CRITERION_IMAGE" "$ROOT"
+    CRITERION_LAYERS=$(docker --context "$CONTEXT" image inspect \
+      --format '{{range .RootFS.Layers}}{{println .}}{{end}}' "$CRITERION_IMAGE") \
+      || refuse criterion-image-missing
+    count=$(printf '%s\n' "$VALIDATOR_LAYERS" | grep -c .)
+    if [ "$(printf '%s\n' "$CRITERION_LAYERS" | grep . | head -n "$count")" != \
+         "$(printf '%s\n' "$VALIDATOR_LAYERS" | grep .)" ] \
+       || [ "$(printf '%s\n' "$CRITERION_LAYERS" | grep -c .)" -le "$count" ]; then
+      docker --context "$CONTEXT" image rm "$CRITERION_IMAGE" >/dev/null 2>&1 || true
+      refuse criterion-base-changed
+    fi
     ;;
   facts)
     docker --context "$CONTEXT" run --rm --platform linux/amd64 --network none "$IMAGE" \
