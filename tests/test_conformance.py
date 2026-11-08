@@ -6,8 +6,11 @@ isolation; the measurements themselves run in `tests/test_performance.py`,
 the `sandbox` group and the design commands.
 """
 
+import contextlib
 import hashlib
 import importlib.util
+import io
+import json
 from pathlib import Path
 import shutil
 import tempfile
@@ -177,6 +180,25 @@ class NativeCriterionTests(unittest.TestCase):
         self.assertEqual(self.resolve(ValidationRefusal("sandbox_unavailable", "sandbox-runtime-missing")), (False, 1))
         self.assertEqual(self.resolve((sandbox_run(), clean_summary()), linux=False), (False, 0))
         self.assertEqual(self.resolve((sandbox_run(), clean_summary()), files=False), (False, 0))
+
+    def test_a_false_run_reports_why(self):
+        summary = {"corpus_exit": 0, "criterion_exit": 2,
+                   "criterion_event": {"event": "checkpoint_authority_conformance_refused", "stage": "invocation",
+                                       "code": "native-execution-unavailable", "exit": 2},
+                   "criterion_stderr": {"sha256": "0" * 64, "bytes": 0},
+                   "read_error": {"file": "report", "type": "FileNotFoundError"}}
+        stderr = io.StringIO()
+        with mock.patch.object(conformance, "_linux_x86_64", return_value=True), \
+                mock.patch.object(conformance, "_criterion_files", return_value=True, create=True), \
+                mock.patch.object(conformance, "_criterion_run", return_value=(sandbox_run(), summary), create=True), \
+                contextlib.redirect_stderr(stderr):
+            value = conformance.native_sequence_linux(context("native-sequence-linux", Groups()))
+        self.assertIs(value, False)
+        event = json.loads(stderr.getvalue().strip().splitlines()[-1])
+        self.assertEqual((event["event"], event["criterion_exit"], event["criterion_event"]["code"],
+                          event["read_error"]), ("native-criterion-finished", 2, "native-execution-unavailable",
+                                                 {"file": "report", "type": "FileNotFoundError"}))
+        self.assertIs(event["summary_parsed"], True)
 
     def test_the_criterion_policy_raises_only_cpu_and_wall_for_this_job(self):
         from fiat_checkpoints.validation.policy import SPECIFICATION, ResourcePolicy

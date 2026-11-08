@@ -136,6 +136,10 @@ CRITERION_REPORT = ".hexaemeron/reports/ordered-replay-native-boundary-coverage.
 CRITERION_CPU_SECONDS = 3600
 CRITERION_WALL_SECONDS = 2400
 EXECUTION_COUNTERS = ("failures", "errors", "skips", "expected_failures", "unexpected_successes")
+# What the finishing event repeats from the driver's summary, so a false value says why.
+CRITERION_EVENT_FIELDS = ("corpus_exit", "criterion_exit", "corpus_event", "criterion_event", "corpus_stderr",
+                          "criterion_stderr", "read_error", "code", "complete", "runner_exit", "executed",
+                          "execution", "report_sha256")
 # Runs in the job as the sandbox user: copy the read-only criterion root to the
 # job's scratch (the conformance runner writes its report under it), run the
 # released manifest check and the criterion, and print one bounded summary.
@@ -148,26 +152,43 @@ for parent, _directories, files in os.walk(root):
     for name in files:
         os.chmod(os.path.join(parent, name), 0o600)
 environment = dict(os.environ, CHECKPOINT_AUTHORITY_NATIVE_SOURCE=native)
-def run(*arguments):
+FIELDS = ("event", "stage", "code", "status", "exit")
+def run(name, *arguments):
     done = subprocess.run([sys.executable, *arguments], cwd=root, env=environment, capture_output=True)
-    return done.returncode
-summary = {"corpus_exit": run("plugins/hexaemeron/tests/checkpoint_authority_native_corpus.py", "--check"),
-           "criterion_exit": run("plugins/hexaemeron/tests/checkpoint_authority_conformance.py",
-                                 "--candidate", "ordered-replay", "--criterion", "native-boundary-coverage",
-                                 "--report", sys.argv[3])}
+    # Each child's stderr leaves only as a digest and a byte count. The released
+    # runner's own last stdout line is a fixed-vocabulary event; only its short
+    # string and integer fields are kept.
+    summary[name + "_exit"] = done.returncode
+    summary[name + "_stderr"] = {"sha256": hashlib.sha256(done.stderr).hexdigest(), "bytes": len(done.stderr)}
+    lines = done.stdout.strip().splitlines()
+    try:
+        event = json.loads(lines[-1]) if lines else None
+    except ValueError:
+        event = None
+    if type(event) is dict:
+        summary[name + "_event"] = {key: event[key] for key in FIELDS if key in event
+                                    and ((type(event[key]) is str and len(event[key]) <= 64)
+                                         or type(event[key]) is int)}
+summary = {}
+run("corpus", "plugins/hexaemeron/tests/checkpoint_authority_native_corpus.py", "--check")
+run("criterion", "plugins/hexaemeron/tests/checkpoint_authority_conformance.py",
+    "--candidate", "ordered-replay", "--criterion", "native-boundary-coverage", "--report", sys.argv[3])
+stage = "report"
 try:
     with open(os.path.join(root, sys.argv[3]), "rb") as stream:
         report = stream.read()
+    stage = "evidence"
     with open(os.path.join(root, sys.argv[3][:-5] + ".evidence.json"), "rb") as stream:
         evidence = json.loads(stream.read())
     execution = evidence.get("execution") or {}
     summary.update(report=json.loads(report), report_sha256=hashlib.sha256(report).hexdigest(),
                    code=evidence.get("code"), complete=evidence.get("complete"),
                    runner_exit=evidence.get("runner_exit"), executed=len(evidence.get("executed_cases") or []),
-                   execution={key: value for key, value in execution.items() if key != "native"},
+                   execution={key: value for key, value in execution.items()
+                              if key not in ("native", "started", "completed")},
                    native=execution.get("native") is not None)
-except (OSError, ValueError, AttributeError):
-    pass
+except (OSError, ValueError, AttributeError) as error:
+    summary["read_error"] = {"file": stage, "type": type(error).__name__}
 print(json.dumps(summary, sort_keys=True))
 """
 
@@ -267,10 +288,10 @@ def native_sequence_linux(context):
         run, summary = _criterion_run()
     except ValidationRefusal:
         return False
+    seen = summary or {}
     print(json.dumps({"event": "native-criterion-finished", "exit": run.exit, "killed": run.killed,
-                      "resources": run.resources, "report_sha256": (summary or {}).get("report_sha256"),
-                      "executed": (summary or {}).get("executed"),
-                      "execution": (summary or {}).get("execution")}, sort_keys=True), file=sys.stderr)
+                      "resources": run.resources, "summary_parsed": summary is not None,
+                      **{key: seen.get(key) for key in CRITERION_EVENT_FIELDS}}, sort_keys=True), file=sys.stderr)
     return _criterion_passed(run, summary)
 
 
